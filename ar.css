@@ -1,0 +1,23 @@
+/* Arabic typography uses local system fonts; no external font request. */
+.ar-page{direction:rtl;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Tahoma,sans-serif}
+.ar-page h1,.ar-page h2,.ar-page h3,.ar-page h4{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Tahoma,sans-serif;letter-spacing:0;line-height:1.32}
+.ar-page .eyebrow{letter-spacing:0;font-size:11px}
+.ar-page .nav-links{direction:rtl}
+.ar-page .nav-actions,.ar-page .hero-actions{direction:rtl}
+.ar-page .hero-art{direction:rtl}
+.ar-page .mini-top{direction:ltr}
+.ar-page .floating-note{left:auto;right:1px;transform:rotate(4deg)}
+.ar-page .hero-stamp{right:auto;left:22px}
+.ar-page .bars{direction:ltr}
+.ar-page .feature{direction:rtl}
+.ar-page .step{text-align:right}
+.ar-page .step:after{right:auto;left:9px}
+.ar-page .cta{direction:rtl}
+.ar-page .footer{direction:rtl}
+.ar-page .field{text-align:right}
+.ar-page .field input,.ar-page .field select,.ar-page .field textarea{direction:rtl;text-align:right}
+.ar-page .field input[type=email],.ar-page .field input[type=url]{direction:ltr;text-align:left}
+.ar-page .form-wrap form{direction:rtl}
+.ar-page .btn{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Tahoma,sans-serif}
+.ar-page .site-note{line-height:1.9}
+@media(max-width:900px){.ar-page .nav-links{display:flex;justify-content:center;flex-wrap:wrap;gap:16px;width:100%;order:3;padding:4px 0 8px}}
