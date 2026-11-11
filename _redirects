@@ -1,0 +1,12 @@
+# Keep authenticated workspaces and form submissions on Hatchable.
+# Cloudflare Pages serves the public marketing site only. These routes need
+# Hatchable's same-origin API and Auth0 session cookies to preserve access.
+https://csconweb-remote.hatchable.site/login?next=/portals.html  /login  302
+https://csconweb-remote.hatchable.site/login?next=/portals.html  /login/  302
+https://csconweb-remote.hatchable.site/login?next=/portals.html  /login.html  302
+https://csconweb-remote.hatchable.site/portals.html  /portals.html  302
+https://csconweb-remote.hatchable.site/ar/portals.html  /ar/portals.html  302
+https://csconweb-remote.hatchable.site/quote.html  /quote.html  302
+https://csconweb-remote.hatchable.site/ar/quote.html  /ar/quote.html  302
+https://csconweb-remote.hatchable.site/careers.html  /careers.html  302
+https://csconweb-remote.hatchable.site/ar/careers.html  /ar/careers.html  302
