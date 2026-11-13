@@ -6,7 +6,7 @@
   "build": { "frontendDist": "../dist" },
   "app": {
     "windows": [],
-    "security": { "csp": null, "withGlobalTauri": false }
+    "security": { "csp": null }
   },
   "bundle": {
     "active": true,
