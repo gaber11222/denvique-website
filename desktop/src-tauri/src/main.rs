@@ -1,4 +1,4 @@
-const APP_URL: &str = "https://csconweb-remote.hatchable.site/";
+const APP_URL: &str = "https://csconweb-remote.hatchable.site/login.html";
 
 const LIVE_SITE_MONITOR: &str = r#"
 (() => {
