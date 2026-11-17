@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "DENVique Website Activity",
+  "version": "1.0.0",
+  "description": "Records website domains for a consented DENVique work session.",
+  "permissions": [
+    "tabs",
+    "alarms",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:43189/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  }
+}
