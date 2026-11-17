@@ -5,7 +5,7 @@ const $=id=>document.getElementById(id);
 const el={
  signedOut:$('signed-out'),signedIn:$('signed-in'),signIn:$('sign-in'),signOut:$('sign-out'),
  stateTitle:$('state-title'),stateDetail:$('state-detail'),dot:$('state-dot'),
- name:$('employee-name'),email:$('employee-email'),platform:$('device-platform'),connection:$('connection-state'),browser:$('browser-extension-state'),
+ name:$('employee-name'),email:$('employee-email'),platform:$('device-platform'),connection:$('connection-state'),meta:$('employee-meta'),extensionCard:$('browser-extension-card'),browser:$('browser-extension-state'),
  activation:$('activation'),monitoring:$('monitoring'),breakState:$('break-state'),
  consent:$('work-consent'),start:$('start-monitoring'),stop:$('stop-monitoring'),refresh:$('refresh'),
  openCheckin:$('open-checkin'),extension:$('extension-folder'),extensionHelp:$('extension-help'),status:$('status')
@@ -35,6 +35,9 @@ function render(state){
  const schedule=current.shift;
  const start=formatTime(schedule&&schedule.starts_at),end=formatTime(schedule&&schedule.ends_at);
  const stateName=current.state||'unknown';
+ const outsideShift=stateName==='outside_shift';
+ if(el.meta)el.meta.classList.toggle('hidden',outsideShift);
+ if(el.extensionCard)el.extensionCard.classList.toggle('hidden',outsideShift);
  el.dot.className='dot'+(current.monitoring_active?' active':(stateName==='outside_shift'?'':' warn'));
  if(stateName==='outside_shift'){
   el.stateTitle.textContent='Outside scheduled shift';
