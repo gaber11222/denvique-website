@@ -323,7 +323,7 @@ async function signIn(){
   return {ok:true};
 }
 async function signOut(){
-  if(monitoringSessionId&&monitoringActive){
+  if(monitoringSessionId){
     try{await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId}})}catch(_){}
   }
   stopCaptureTimer();stopActivityTimer();
@@ -347,6 +347,7 @@ async function openLocalServer(){
       res.setHeader('Vary','Origin');
       res.setHeader('Access-Control-Allow-Methods','GET, POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers','Content-Type, x-denvique-token');
+      res.setHeader('Access-Control-Allow-Private-Network','true');
       res.setHeader('Access-Control-Max-Age','600');
     }
     if(req.method==='OPTIONS'){res.writeHead(allowed?204:403);return res.end()}
@@ -391,6 +392,17 @@ function makeMainWindow(){
     webPreferences:{preload:path.join(__dirname,'preload.js'),partition:PARTITION,contextIsolation:true,nodeIntegration:false,sandbox:true}
   });
   mainWindow.loadFile(path.join(__dirname,'index.html'));
+  mainWindow.on('close',event=>{
+    if(!monitoringSessionId||quitting)return;
+    event.preventDefault();
+    dialog.showMessageBox(mainWindow,{
+      type:'warning',buttons:['Keep app open','Stop monitoring and close'],defaultId:0,cancelId:0,
+      title:'Work-monitoring session is active',
+      message:'Stop the current work-monitoring session before closing DENVique Desktop Monitor.'
+    }).then(result=>{
+      if(result.response===1)stopMonitoring().then(()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.destroy()}).catch(error=>emitState(error.message));
+    });
+  });
   mainWindow.on('closed',()=>{mainWindow=null});
 }
 function extensionFolder(){
@@ -420,7 +432,7 @@ app.on('open-url',(event,url)=>{event.preventDefault();if(url.startsWith('denviq
 let quitting=false;
 app.on('before-quit',event=>{
   if(quitting)return;
-  if(monitoringSessionId&&monitoringActive){
+  if(monitoringSessionId){
     event.preventDefault();
     stopMonitoring().finally(()=>{quitting=true;app.quit()});
   }
