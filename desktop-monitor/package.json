@@ -45,7 +45,10 @@
       ],
       "artifactName": "DENVique-Monitor-mac-${arch}.${ext}",
       "category": "public.app-category.productivity",
-      "identity": null
+      "identity": null,
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "DENVique Desktop Monitor reads the name of the frontmost application during an acknowledged work-monitoring session. It does not read window titles, typed text or application contents."
+      }
     },
     "win": {
       "target": [
