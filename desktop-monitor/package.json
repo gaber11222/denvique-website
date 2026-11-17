@@ -1,0 +1,67 @@
+{
+  "name": "denvique-desktop-monitor",
+  "version": "0.1.0",
+  "description": "DENVique employee desktop companion for shift attendance and consented work monitoring.",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:mac": "electron-builder --mac dmg --arm64",
+    "build:win": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "45.3.4",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.denvique.desktopmonitor",
+    "productName": "DENVique Desktop Monitor",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html"
+    ],
+    "protocols": [
+      {
+        "name": "DENVique Desktop Monitor",
+        "schemes": [
+          "denvique-monitor"
+        ]
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "DENVique-Monitor-mac-arm64.${ext}",
+      "category": "public.app-category.productivity",
+      "identity": null
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "DENVique-Monitor-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
