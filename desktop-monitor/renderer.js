@@ -5,7 +5,7 @@ const $=id=>document.getElementById(id);
 const el={
  signedOut:$('signed-out'),signedIn:$('signed-in'),signIn:$('sign-in'),signOut:$('sign-out'),
  stateTitle:$('state-title'),stateDetail:$('state-detail'),dot:$('state-dot'),
- name:$('employee-name'),email:$('employee-email'),platform:$('device-platform'),connection:$('connection-state'),
+ name:$('employee-name'),email:$('employee-email'),platform:$('device-platform'),connection:$('connection-state'),browser:$('browser-extension-state'),
  activation:$('activation'),monitoring:$('monitoring'),breakState:$('break-state'),
  consent:$('work-consent'),start:$('start-monitoring'),stop:$('stop-monitoring'),refresh:$('refresh'),
  openCheckin:$('open-checkin'),extension:$('extension-folder'),extensionHelp:$('extension-help'),status:$('status')
@@ -31,6 +31,7 @@ function render(state){
  el.email.textContent=current.user&&current.user.email||'';
  el.platform.textContent=current.platform||'—';
  el.connection.textContent=current.agent_connected?'Connected':'Connecting…';
+ el.browser.textContent=current.browser_extension_required?(current.browser_extension_connected?'Connected':'Required for Chrome / Edge'):'macOS browser integration';
  const schedule=current.shift;
  const start=formatTime(schedule&&schedule.starts_at),end=formatTime(schedule&&schedule.ends_at);
  const stateName=current.state||'unknown';
