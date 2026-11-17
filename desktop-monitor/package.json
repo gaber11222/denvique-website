@@ -7,7 +7,8 @@
   "scripts": {
     "start": "electron .",
     "build:mac": "electron-builder --mac dmg --arm64",
-    "build:win": "electron-builder --win nsis --x64"
+    "build:win": "electron-builder --win nsis --x64",
+    "build:mac:intel": "electron-builder --mac dmg --x64"
   },
   "devDependencies": {
     "electron": "45.3.4",
@@ -42,7 +43,7 @@
           ]
         }
       ],
-      "artifactName": "DENVique-Monitor-mac-arm64.${ext}",
+      "artifactName": "DENVique-Monitor-mac-${arch}.${ext}",
       "category": "public.app-category.productivity",
       "identity": null
     },
