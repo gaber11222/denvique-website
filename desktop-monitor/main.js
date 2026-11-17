@@ -32,6 +32,8 @@ let breakActive=false;
 let currentState=null;
 let currentUser=null;
 let currentAppName='';
+let currentSiteDomain='';
+let browserPermissionNoticeShown=false;
 let localServer=null;
 const localToken=crypto.randomBytes(32).toString('hex');
 let deviceId='';
@@ -169,15 +171,48 @@ async function captureScreens(){
   }
 }
 async function sendActivity(eventType,itemName,source){
-  if(!monitoringActive||breakActive||!monitoringSessionId||!itemName)return;
+  if(!monitoringActive||breakActive||!monitoringSessionId||!itemName)return false;
   try{
     await apiRequest('/api/desktop-monitor',{method:'POST',body:{
       action:'event',session_id:monitoringSessionId,event_type:eventType,
       item_name:String(itemName).slice(0,180),domain:eventType==='site'?String(itemName).slice(0,180):null,
       source:source||'desktop-agent'
     }});
+    return true;
   }catch(error){
     if(!/no longer active|shift has ended|paused during/i.test(error.message))emitState('Activity update could not be saved: '+error.message);
+    return false;
+  }
+}
+async function endActivity(eventType){
+  if(!monitoringSessionId||!currentUser)return false;
+  try{
+    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'end_event',session_id:monitoringSessionId,event_type:eventType}});
+    return true;
+  }catch(_){return false}
+}
+async function browserDomainForMac(appName){
+  if(process.platform!=='darwin')return '';
+  const scripts={
+    'Safari':'tell application "Safari" to get URL of current tab of front window',
+    'Google Chrome':'tell application "Google Chrome" to get URL of active tab of front window',
+    'Google Chrome Helper':'tell application "Google Chrome" to get URL of active tab of front window',
+    'Microsoft Edge':'tell application "Microsoft Edge" to get URL of active tab of front window'
+  };
+  const script=scripts[appName];
+  if(!script)return '';
+  try{
+    const result=await execFileAsync('/usr/bin/osascript',['-e',script],{timeout:5000,maxBuffer:1024*1024});
+    const url=new URL(String(result.stdout||'').trim());
+    if(!['http:','https:'].includes(url.protocol))return '';
+    return url.hostname.toLowerCase().slice(0,180);
+  }catch(error){
+    const message=String(error&&error.message||error);
+    if(!browserPermissionNoticeShown&&/not authorized|(-1743)|not permitted/i.test(message)){
+      browserPermissionNoticeShown=true;
+      emitState('macOS may ask you to allow DENVique Desktop Monitor to read the active browser tab so it can record the website domain.');
+    }
+    return '';
   }
 }
 async function foregroundApplication(){
@@ -202,12 +237,26 @@ async function foregroundApplication(){
   }
 }
 async function pollForegroundApp(){
-  if(!monitoringActive||breakActive||!monitoringSessionId){currentAppName='';return}
+  if(!monitoringActive||breakActive||!monitoringSessionId){
+    currentAppName='';
+    currentSiteDomain='';
+    return;
+  }
   const name=await foregroundApplication();
-  if(!name||name===currentAppName)return;
-  currentAppName=name;
-  await sendActivity('app',name,'desktop-agent');
-  emitState('Application activity updated.');
+  if(name&&name!==currentAppName){
+    if(await sendActivity('app',name,'desktop-agent')){
+      currentAppName=name;
+      emitState('Application activity updated.');
+    }
+  }
+  if(process.platform==='darwin'){
+    const domain=await browserDomainForMac(name);
+    if(domain&&domain!==currentSiteDomain){
+      if(await sendActivity('site',domain,'macos-browser-automation'))currentSiteDomain=domain;
+    }else if(!domain&&currentSiteDomain){
+      if(await endActivity('site'))currentSiteDomain='';
+    }
+  }
 }
 function startActivityTimer(){
   if(appPollTimer)clearInterval(appPollTimer);
@@ -217,6 +266,7 @@ function startActivityTimer(){
 function stopActivityTimer(){
   if(appPollTimer){clearInterval(appPollTimer);appPollTimer=null}
   currentAppName='';
+  currentSiteDomain='';
 }
 async function refreshState(){
   if(!currentUser)return buildUiState();
