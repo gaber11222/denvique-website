@@ -62,6 +62,12 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
-    }
+    },
+    "extraResources": [
+      {
+        "from": "extension",
+        "to": "extension"
+      }
+    ]
   }
 }
