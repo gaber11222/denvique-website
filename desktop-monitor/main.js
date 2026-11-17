@@ -34,6 +34,7 @@ let currentUser=null;
 let currentAppName='';
 let currentSiteDomain='';
 let browserPermissionNoticeShown=false;
+let browserExtensionSeenAt=0;
 let localServer=null;
 const localToken=crypto.randomBytes(32).toString('hex');
 let deviceId='';
@@ -92,6 +93,8 @@ function buildUiState(){
     session_id:monitoringSessionId,
     device_id:deviceId,
     screen_permission:screenPermissionStatus(),
+    browser_extension_connected:browserExtensionSeenAt>0&&Date.now()-browserExtensionSeenAt<=90000,
+    browser_extension_required:process.platform==='win32',
     status_detail:state.state==='outside_shift'?'No current shift is scheduled.':state.state==='pre_shift'?'Your scheduled shift is approaching.':state.state==='on_break'?'Monitoring is paused for your recorded break.':state.state==='in_shift'?'Your scheduled shift is in progress.':'',
   };
 }
@@ -316,6 +319,13 @@ async function startMonitoring(){
   if(!stateHasShift())throw new Error('You are outside your scheduled shift window.');
   if(breakActive||currentState.state==='on_break')throw new Error('Monitoring stays paused during your recorded break.');
   if(monitoringActive)return buildUiState();
+  if(process.platform==='win32'&&Date.now()-browserExtensionSeenAt>90000){
+    throw new Error('Install and enable the DENVique Website Activity extension in Chrome or Edge, then press Refresh before activating the shift.');
+  }
+  if(process.platform==='darwin'){
+    const foreground=await foregroundApplication();
+    if(!foreground)throw new Error('Allow the required macOS Accessibility / Automation permission so the app can identify the active application, then retry.');
+  }
   await ensureScreenPermission();
   const result=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
     action:'start',accepted:true,device_id:deviceId,platform:platformName(),app_version:appVersion()
@@ -407,6 +417,7 @@ async function openLocalServer(){
       return res.end(JSON.stringify({token:localToken}));
     }
     if(req.method==='GET'&&req.url==='/state'){
+      browserExtensionSeenAt=Date.now();
       res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});
       return res.end(JSON.stringify({active:monitoringActive&&!breakActive,session_id:monitoringSessionId}));
     }
