@@ -10,7 +10,7 @@ on:
 
 concurrency:
   group: denvique-desktop-monitor-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -36,26 +36,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  build-mac-intel:
-    runs-on: macos-15-intel
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install dependencies
-        working-directory: desktop-monitor
-        run: npm install --no-audit --no-fund
-      - name: Build Intel Mac DMG
-        working-directory: desktop-monitor
-        run: npm run build:mac:intel
-      - uses: actions/upload-artifact@v4
-        with:
-          name: DENVique-Monitor-mac-x64
-          path: desktop-monitor/dist/DENVique-Monitor-mac-x64.dmg
-          if-no-files-found: error
-          retention-days: 14
-
   build-windows:
     runs-on: windows-latest
     steps:
@@ -77,7 +57,7 @@ jobs:
           retention-days: 14
 
   publish-release:
-    needs: [build-mac, build-mac-intel, build-windows]
+    needs: [build-mac, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
