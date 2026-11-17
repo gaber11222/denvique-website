@@ -8,6 +8,10 @@ on:
       - ".github/workflows/build-desktop-monitor.yml"
   workflow_dispatch:
 
+concurrency:
+  group: denvique-desktop-monitor-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -20,9 +24,11 @@ jobs:
         with:
           node-version: 22
       - name: Install dependencies
-        run: npm install --prefix desktop-monitor --no-audit --no-fund
+        working-directory: desktop-monitor
+        run: npm install --no-audit --no-fund
       - name: Build Apple Silicon DMG
-        run: npm run build:mac --prefix desktop-monitor
+        working-directory: desktop-monitor
+        run: npm run build:mac
       - uses: actions/upload-artifact@v4
         with:
           name: DENVique-Monitor-mac-arm64
@@ -37,12 +43,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: desktop-monitor/package.json
       - name: Install dependencies
-        run: npm install --prefix desktop-monitor --no-audit --no-fund
+        working-directory: desktop-monitor
+        run: npm install --no-audit --no-fund
       - name: Build Windows installer
-        run: npm run build:win --prefix desktop-monitor
+        working-directory: desktop-monitor
+        run: npm run build:win
       - uses: actions/upload-artifact@v4
         with:
           name: DENVique-Monitor-Windows-x64
