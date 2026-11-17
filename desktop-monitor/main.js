@@ -338,9 +338,9 @@ async function startMonitoring(){
   emitState('Work monitoring activated.');
   return buildUiState();
 }
-async function stopMonitoring(){
+async function stopMonitoring(reason='employee_stopped'){
   if(monitoringSessionId&&currentUser){
-    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId}});
+    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId,device_id:deviceId,reason:reason||'employee_stopped'}});
   }
   monitoringActive=false;
   breakActive=false;
@@ -381,7 +381,7 @@ async function signIn(){
 }
 async function signOut(){
   if(monitoringSessionId){
-    try{await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId}})}catch(_){}
+    try{await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId,device_id:deviceId,reason:'signed_out'}})}catch(_){}
   }
   stopCaptureTimer();stopActivityTimer();
   if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null}
@@ -464,7 +464,7 @@ function makeMainWindow(){
       title:'Work-monitoring session is active',
       message:'Stop the current work-monitoring session before closing DENVique Desktop Monitor.'
     }).then(result=>{
-      if(result.response===1)stopMonitoring().then(()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.destroy()}).catch(error=>emitState(error.message));
+      if(result.response===1)stopMonitoring('app_closed').then(()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.destroy()}).catch(error=>emitState(error.message));
     });
   });
   mainWindow.on('closed',()=>{mainWindow=null});
@@ -476,7 +476,7 @@ ipcMain.handle('monitor:get-state',async()=>{if(!currentUser){try{await verifyLo
 ipcMain.handle('monitor:sign-in',()=>signIn());
 ipcMain.handle('monitor:sign-out',()=>signOut());
 ipcMain.handle('monitor:start',()=>startMonitoring());
-ipcMain.handle('monitor:stop',()=>stopMonitoring());
+ipcMain.handle('monitor:stop',()=>stopMonitoring('employee_stopped'));
 ipcMain.handle('monitor:refresh',()=>heartbeatLoop().then(()=>buildUiState()));
 ipcMain.handle('monitor:open-checkin',()=>shell.openExternal(APP_ORIGIN+'/checkin-verification'));
 ipcMain.handle('monitor:open-extension-folder',()=>shell.openPath(extensionFolder()));
@@ -498,7 +498,7 @@ app.on('before-quit',event=>{
   if(quitting)return;
   if(monitoringSessionId){
     event.preventDefault();
-    stopMonitoring().finally(()=>{quitting=true;app.quit()});
+    stopMonitoring('app_closed').finally(()=>{quitting=true;app.quit()});
   }
 });
 app.on('window-all-closed',()=>{if(process.platform!=='darwin'&&!monitoringActive)app.quit()});
