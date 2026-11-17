@@ -8,7 +8,8 @@
     "start": "electron .",
     "build:mac": "electron-builder --mac dmg --arm64",
     "build:win": "electron-builder --win nsis --x64",
-    "build:mac:intel": "electron-builder --mac dmg --x64"
+    "build:mac:intel": "electron-builder --mac dmg --x64",
+    "check": "node --check main.js && node --check renderer.js && node --check preload.js && node --check extension/service-worker.js && node -e \"JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8'))\""
   },
   "devDependencies": {
     "electron": "45.3.4",

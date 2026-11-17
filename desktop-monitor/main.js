@@ -94,7 +94,7 @@ function buildUiState(){
     device_id:deviceId,
     screen_permission:screenPermissionStatus(),
     browser_extension_connected:browserExtensionSeenAt>0&&Date.now()-browserExtensionSeenAt<=90000,
-    browser_extension_required:process.platform==='win32',
+    browser_extension_required:false,
     status_detail:state.state==='outside_shift'?'No current shift is scheduled.':state.state==='pre_shift'?'Your scheduled shift is approaching.':state.state==='on_break'?'Monitoring is paused for your recorded break.':state.state==='in_shift'?'Your scheduled shift is in progress.':'',
   };
 }
@@ -225,7 +225,7 @@ async function foregroundApplication(){
       const result=await execFileAsync('/usr/bin/osascript',['-e','tell application "System Events" to get name of first application process whose frontmost is true'],{timeout:5000,maxBuffer:1024*1024});
       name=String(result.stdout||'').trim();
     }else if(process.platform==='win32'){
-      const ps="$src='using System; using System.Runtime.InteropServices; public class FG { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint pid); }'; Add-Type $src; $hwnd=[FG]::GetForegroundWindow(); [uint32]$pid=0; [void][FG]::GetWindowThreadProcessId($hwnd,[ref]$pid); if($pid -gt 0){(Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName}";
+      const ps="$src='using System; using System.Runtime.InteropServices; public class FG { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint pid); }'; Add-Type $src; $hwnd=[FG]::GetForegroundWindow(); [uint32]$processId=0; [void][FG]::GetWindowThreadProcessId($hwnd,[ref]$processId); if($processId -gt 0){(Get-Process -Id $processId -ErrorAction SilentlyContinue).ProcessName}";
       const result=await execFileAsync('powershell.exe',['-NoProfile','-NonInteractive','-Command',ps],{timeout:7000,maxBuffer:1024*1024,windowsHide:true});
       name=String(result.stdout||'').trim();
     }
@@ -319,9 +319,6 @@ async function startMonitoring(){
   if(!stateHasShift())throw new Error('You are outside your scheduled shift window.');
   if(breakActive||currentState.state==='on_break')throw new Error('Monitoring stays paused during your recorded break.');
   if(monitoringActive)return buildUiState();
-  if(process.platform==='win32'&&Date.now()-browserExtensionSeenAt>90000){
-    throw new Error('Install and enable the DENVique Website Activity extension in Chrome or Edge, then press Refresh before activating the shift.');
-  }
   if(process.platform==='darwin'){
     const foreground=await foregroundApplication();
     if(!foreground)throw new Error('Allow the required macOS Accessibility / Automation permission so the app can identify the active application, then retry.');
@@ -428,10 +425,16 @@ async function openLocalServer(){
       req.on('end',async()=>{
         try{
           const body=JSON.parse(raw||'{}');
+          if(!monitoringActive||breakActive||!monitoringSessionId)throw new Error('monitoring_not_active');
+          if(body.event_type==='site_end'){
+            await endActivity('site');
+            currentSiteDomain='';
+            res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,closed:true}));
+            return;
+          }
           if(body.event_type!=='site')throw new Error('site_event_required');
           const domain=String(body.domain||body.item_name||'').toLowerCase();
           if(!/^[a-z0-9.-]{1,180}$/.test(domain))throw new Error('valid_domain_required');
-          if(!monitoringActive||breakActive||!monitoringSessionId)throw new Error('monitoring_not_active');
           await sendActivity('site',domain,'browser-extension');
           res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true}));
         }catch(error){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:error.message}))}

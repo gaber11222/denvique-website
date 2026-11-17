@@ -31,7 +31,7 @@ function render(state){
  el.email.textContent=current.user&&current.user.email||'';
  el.platform.textContent=current.platform||'—';
  el.connection.textContent=current.agent_connected?'Connected':'Connecting…';
- el.browser.textContent=current.browser_extension_required?(current.browser_extension_connected?'Connected':'Required for Chrome / Edge'):'macOS browser integration';
+ el.browser.textContent=current.platform==='Windows'?(current.browser_extension_connected?'Connected':'Optional — not installed'):(current.platform==='macOS'?'Built-in domain integration':'Optional browser extension');
  const schedule=current.shift;
  const start=formatTime(schedule&&schedule.starts_at),end=formatTime(schedule&&schedule.ends_at);
  const stateName=current.state||'unknown';

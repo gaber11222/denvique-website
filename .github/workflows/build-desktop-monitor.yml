@@ -10,7 +10,7 @@ on:
 
 concurrency:
   group: denvique-desktop-monitor-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         working-directory: desktop-monitor
         run: npm install --no-audit --no-fund
+      - name: Validate desktop app and extension source
+        working-directory: desktop-monitor
+        run: npm run check
       - name: Build Apple Silicon DMG
         working-directory: desktop-monitor
         run: npm run build:mac
@@ -46,6 +49,9 @@ jobs:
       - name: Install dependencies
         working-directory: desktop-monitor
         run: npm install --no-audit --no-fund
+      - name: Validate desktop app and extension source
+        working-directory: desktop-monitor
+        run: npm run check
       - name: Build Windows installer
         working-directory: desktop-monitor
         run: npm run build:win
