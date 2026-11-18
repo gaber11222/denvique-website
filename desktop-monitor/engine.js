@@ -75,7 +75,7 @@ async function verifyLogin(){
   });
   const data=await response.json().catch(()=>({}));
   if(!response.ok||!data.authenticated||!data.user)return null;
-  if(!['employee','team_leader','quality_analyst','trainer','operations_manager','account_manager','executive_manager'].includes(data.user.role)||data.user.status!=='active')throw new Error('Only active DENVique staff accounts can use this application.');
+  if(!['employee','team_leader','quality_analyst','trainer','operations_manager','account_manager'].includes(data.user.role)||data.user.status!=='active')throw new Error('Only active DENVique staff accounts can use this application.');
   currentUser=data.user;
   return currentUser;
 }
@@ -129,13 +129,13 @@ function stateHasShift(){
 function stopCaptureTimer(){
   if(captureTimer){clearTimeout(captureTimer);captureTimer=null}
 }
-function scheduleCapture(){
+function scheduleCapture(delay=SCREEN_INTERVAL_MS){
   stopCaptureTimer();
   if(!portalAccessActive)return;
   captureTimer=setTimeout(async()=>{
-    await captureScreens();
-    scheduleCapture();
-  },SCREEN_INTERVAL_MS);
+    const saved=await captureScreens();
+    scheduleCapture(saved?SCREEN_INTERVAL_MS:30000);
+  },delay);
 }
 async function getScreenSources(){
   const sources=await desktopCapturer.getSources({
@@ -154,7 +154,7 @@ async function getScreenSources(){
   return valid;
 }
 async function captureScreens(){
-  if(!portalAccessActive)return;
+  if(!portalAccessActive)return false;
   try{
     const sources=await getScreenSources();
     let saved=0;
@@ -178,8 +178,10 @@ async function captureScreens(){
       }catch(error){emitState('A screen capture could not be uploaded: '+error.message)}
     }
     if(saved)emitState('Screen snapshot saved.');
+    return saved>0;
   }catch(error){
     emitState(error.message||'Screen capture is not available.');
+    return false;
   }
 }
 async function sendActivity(eventType,itemName,source){
@@ -352,8 +354,8 @@ async function startMonitoring(){
   portalAccessActive=access.portal_access_active===true;
   if(!portalAccessActive)throw new Error('The server did not confirm the active Desktop Monitor connection.');
   breakActive=access.state==='on_break'||access.break_active===true;
-  await captureScreens();
-  scheduleCapture();
+  const initialCaptureSaved=await captureScreens();
+  scheduleCapture(initialCaptureSaved?SCREEN_INTERVAL_MS:30000);
 
   const workCaptureRequired=currentUser.role==='employee'&&
     ['pre_shift','in_shift'].includes(access.state)&&access.break_active!==true;
