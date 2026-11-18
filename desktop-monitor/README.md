@@ -17,7 +17,7 @@ The employee sees the work-monitoring notice and actively enables the session. T
 
 ## Install
 
-Use the Mac DMG or Windows installer from the latest GitHub release. The app is ad-hoc signed for bundle integrity but is not notarized by Apple because DENVique is using the free distribution route. On macOS, install it in Applications, then Control-click the app and choose Open once to approve it; grant Screen Recording (and the requested Accessibility / Automation permissions) in System Settings when prompted. After this one-time approval, launch it normally. Windows may show the standard SmartScreen unknown-publisher notice; choose More info → Run anyway for this build. Removing these first-run trust prompts completely requires paid platform code-signing credentials.
+Use the Mac DMG or Windows installer from the latest GitHub release. The Mac app is ad-hoc signed for bundle integrity but is not notarized by Apple because DENVique is using the free distribution route. On macOS, install it in Applications, then Control-click the app and choose Open once to approve it; grant Screen Recording and any requested Accessibility / Automation permissions in System Settings. After this one-time approval, launch it normally. Windows may show the standard SmartScreen unknown-publisher notice; choose More info → Run anyway for this build. Removing these first-run trust prompts completely requires paid platform code-signing credentials.
 
 ## Optional browser extension
 

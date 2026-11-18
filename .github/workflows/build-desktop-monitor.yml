@@ -28,7 +28,7 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Set release version
         working-directory: desktop-monitor
-        run: npm version --no-git-tag-version "0.1.${{ github.run_number }}"
+        run: npm version --no-git-tag-version --allow-same-version "0.1.${{ github.run_number }}"
       - name: Validate desktop app and extension source
         working-directory: desktop-monitor
         run: npm run check
@@ -69,26 +69,14 @@ jobs:
           retention-days: 14
 
   publish-release:
-    needs: [build-windows]
+    needs: [build-mac, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: DENVique-Monitor-Windows-x64
+          pattern: DENVique-Monitor-*
           path: release-assets
-      - name: Include the latest compatible Mac package
-        run: |
-          set -euo pipefail
-          base="https://github.com/gaber11222/denvique-website/releases/download/desktop-monitor-30"
-          for file in \
-            DENVique-Monitor-mac-arm64.dmg \
-            DENVique-Monitor-mac-arm64.dmg.blockmap \
-            DENVique-Monitor-mac-arm64.zip \
-            DENVique-Monitor-mac-arm64.zip.blockmap \
-            latest-mac.yml
-          do
-            curl --fail --location --silent --show-error "$base/$file" -o "release-assets/$file"
-          done
+          merge-multiple: true
       - name: Publish latest desktop installers
         uses: softprops/action-gh-release@v2
         with:
