@@ -474,7 +474,7 @@ function setupAutoUpdater(){
     console.error('DENVique update check failed:',String(error&&error.message||error).slice(0,500));
   });
   updaterInitialTimer=setTimeout(check,20000);
-  updaterCheckTimer=setInterval(check,4*60*60*1000);
+  updaterCheckTimer=setInterval(check,5*60*1000);
   app.on('will-quit',()=>{
     if(updaterInitialTimer)clearTimeout(updaterInitialTimer);
     if(updaterCheckTimer)clearInterval(updaterCheckTimer);
