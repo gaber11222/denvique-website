@@ -32,6 +32,7 @@ let appPollTimer=null;
 let monitoringSessionId=null;
 let monitoringActive=false;
 let portalAccessActive=false;
+let portalAccessSessionId=null;
 let portalAccessDesired=false;
 let breakActive=false;
 let currentState=null;
@@ -301,16 +302,20 @@ async function refreshState(){
   else if(heartbeat.state==='outside_shift')monitoringSessionId=null;
   const wasActive=monitoringActive;
   const wasPortalActive=portalAccessActive;
+  const previousPortalSessionId=portalAccessSessionId;
   portalAccessActive=heartbeat.portal_access_active===true&&
     heartbeat.access_session?.process_id===APP_INSTANCE_ID&&
     Number(heartbeat.access_session?.process_started_at||0)===APP_INSTANCE_STARTED_AT;
+  portalAccessSessionId=portalAccessActive?Number(heartbeat.access_session?.id||0)||null:null;
+  const portalSessionChanged=!!portalAccessSessionId&&portalAccessSessionId!==previousPortalSessionId;
   breakActive=heartbeat.state==='on_break'||heartbeat.break_active===true;
   monitoringActive=currentUser.role==='employee'&&heartbeat.monitoring_active===true&&!breakActive;
 
   // Screen snapshots follow the activated desktop-access session, not the shift.
-  // A newly reconnected process sends an immediate snapshot before reopening access.
+  // A newly created access session must get its own immediate first screenshot.
   if(!portalAccessActive)stopCaptureTimer();
-  else if(portalAccessDesired&&!wasPortalActive){
+  else if(portalAccessDesired&&(!wasPortalActive||portalSessionChanged)){
+    stopCaptureTimer();
     const saved=await captureScreens();
     scheduleCapture(saved?SCREEN_INTERVAL_MS:30000);
   }else if(!captureTimer)scheduleCapture();
@@ -357,6 +362,7 @@ async function startMonitoring(){
   portalAccessDesired=true;
   currentState=access;
   portalAccessActive=access.portal_access_active===true;
+  portalAccessSessionId=Number(access.access_session?.id||access.access_session_id||0)||null;
   if(!portalAccessActive)throw new Error('The server did not confirm the active Desktop Monitor connection.');
   breakActive=access.state==='on_break'||access.break_active===true;
   const initialCaptureSaved=await captureScreens();
@@ -409,6 +415,7 @@ async function stopMonitoring(reason='employee_stopped'){
   }
   monitoringActive=false;
   portalAccessActive=false;
+  portalAccessSessionId=null;
   breakActive=false;
   monitoringSessionId=null;
   stopCaptureTimer();
@@ -453,7 +460,7 @@ async function signOut(){
     try{await fetch(API_BASE+'/api/auth0/session',{method:'DELETE',headers:{Origin:APP_ORIGIN,Cookie:cookie,Accept:'application/json'}})}catch(_){}
   }
   try{await getPartition().cookies.remove(APP_ORIGIN,'denvique_auth0_session')}catch(_){}
-  currentUser=null;currentState=null;monitoringActive=false;portalAccessActive=false;portalAccessDesired=false;breakActive=false;monitoringSessionId=null;
+  currentUser=null;currentState=null;monitoringActive=false;portalAccessActive=false;portalAccessSessionId=null;portalAccessDesired=false;breakActive=false;monitoringSessionId=null;
   emitState('Signed out.');
   return buildUiState();
 }
