@@ -21,6 +21,12 @@ The staff member sees the access and monitoring notice and must actively enable 
 
 Use the Mac DMG or Windows installer from the latest GitHub release. The Mac app is ad-hoc signed for bundle integrity but is not notarized by Apple because DENVique is using the free distribution route. On macOS, install it in Applications, then Control-click the app and choose Open once to approve it; grant Screen Recording and any requested Accessibility / Automation permissions in System Settings. After this one-time approval, launch it normally. Windows may show the standard SmartScreen unknown-publisher notice; choose More info → Run anyway for this build. Removing these first-run trust prompts completely requires paid platform code-signing credentials.
 
+## Automatic updates
+
+The employee interface is loaded from the live DENVique website, so page, layout, copy and server-side changes appear without reinstalling the desktop app. The monitoring engine is now kept separately from the stable Electron launcher: on both macOS and Windows, the launcher checks the latest DENVique GitHub release, downloads a newer engine over HTTPS, verifies its SHA-256 digest, and stages it in the app's private user-data folder. The verified engine becomes active automatically the next time the app is opened; employees do not need to download a new DMG or EXE for ordinary monitoring-engine changes.
+
+Windows also keeps the Electron / Chromium shell updater through the NSIS installer feed, which downloads updates in the background and installs them when the app exits. On macOS, updates to Electron / Chromium itself still require a new DMG at present: Apple's supported automatic updater requires a consistent Developer ID code signature, which this free ad-hoc-signed build does not have. Changes to the monitoring engine and the live website interface do not require that DMG.
+
 ## Optional browser extension
 
 1. Open the desktop app and select Open extension folder.

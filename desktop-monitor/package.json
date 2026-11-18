@@ -9,7 +9,7 @@
     "build:mac": "electron-builder --mac dmg zip --arm64 --publish never",
     "build:win": "electron-builder --win nsis --x64 --publish never",
     "build:mac:intel": "electron-builder --mac dmg zip --x64 --publish never",
-    "check": "node --check main.js && node --check renderer.js && node --check preload.js && node --check extension/service-worker.js && node -e \"JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8'))\""
+    "check": "node --check main.js && node --check engine.js && node --check renderer.js && node --check preload.js && node --check extension/service-worker.js && node -e \"JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8'))\""
   },
   "devDependencies": {
     "electron": "45.3.4",
@@ -23,6 +23,7 @@
     },
     "files": [
       "main.js",
+      "engine.js",
       "preload.js",
       "renderer.js",
       "index.html"

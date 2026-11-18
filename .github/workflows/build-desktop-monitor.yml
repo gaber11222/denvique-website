@@ -72,12 +72,35 @@ jobs:
     needs: [build-mac, build-windows]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: DENVique-Monitor-*
           path: release-assets
           merge-multiple: true
-      - name: Publish latest desktop installers
+      - name: Create verified cross-platform runtime update
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          cp desktop-monitor/engine.js release-assets/DENVique-Monitor-runtime.cjs
+          node <<'NODE'
+          const fs = require('node:fs');
+          const crypto = require('node:crypto');
+          const run = process.env.GITHUB_RUN_NUMBER;
+          const version = `0.1.${run}`;
+          const tag = `desktop-monitor-${run}`;
+          const file = 'release-assets/DENVique-Monitor-runtime.cjs';
+          const sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+          const manifest = {
+            version,
+            sha256,
+            downloadUrl: `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/download/${tag}/DENVique-Monitor-runtime.cjs`
+          };
+          fs.writeFileSync('release-assets/DENVique-Monitor-runtime.json', JSON.stringify(manifest, null, 2));
+          console.log(`Runtime update prepared: ${version} (${sha256})`);
+          NODE
+      - name: Publish latest desktop installers and runtime update
         uses: softprops/action-gh-release@v2
         with:
           tag_name: desktop-monitor-${{ github.run_number }}
