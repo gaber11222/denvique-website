@@ -19,7 +19,7 @@ const DEVICE_FILE=()=>path.join(app.getPath('userData'),'device.json');
 const EXTENSION_PORT=43189;
 const APP_INSTANCE_ID=crypto.randomUUID();
 const APP_INSTANCE_STARTED_AT=Date.now();
-const HEARTBEAT_INTERVAL_MS=120*1000;
+const HEARTBEAT_INTERVAL_MS=300*1000;
 const APP_POLL_INTERVAL_MS=15*1000;
 
 let mainWindow=null;
