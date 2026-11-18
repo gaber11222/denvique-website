@@ -1,5 +1,7 @@
 const {contextBridge,ipcRenderer}=require('electron');
 
+const trustedOrigin='https://csconweb-remote.hatchable.site';
+if(window.location.origin===trustedOrigin||window.location.protocol==='file:'){
 contextBridge.exposeInMainWorld('denviqueMonitor',{
   getState:()=>ipcRenderer.invoke('monitor:get-state'),
   signIn:()=>ipcRenderer.invoke('monitor:sign-in'),
@@ -12,3 +14,4 @@ contextBridge.exposeInMainWorld('denviqueMonitor',{
   onState:callback=>ipcRenderer.on('monitor:state',(_event,state)=>callback(state)),
   onNotice:callback=>ipcRenderer.on('monitor:notice',(_event,notice)=>callback(notice))
 });
+}

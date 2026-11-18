@@ -26,6 +26,12 @@ jobs:
       - name: Install dependencies
         working-directory: desktop-monitor
         run: npm install --no-audit --no-fund
+      - name: Set release version
+        working-directory: desktop-monitor
+        run: npm version --no-git-tag-version "0.1.${{ github.run_number }}"
+      - name: Set release version
+        working-directory: desktop-monitor
+        run: npm version --no-git-tag-version "0.1.${{ github.run_number }}"
       - name: Validate desktop app and extension source
         working-directory: desktop-monitor
         run: npm run check
@@ -35,7 +41,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: DENVique-Monitor-mac-arm64
-          path: desktop-monitor/dist/*.dmg
+          path: desktop-monitor/dist/*
           if-no-files-found: error
           retention-days: 14
 
@@ -58,7 +64,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: DENVique-Monitor-Windows-x64
-          path: desktop-monitor/dist/*.exe
+          path: desktop-monitor/dist/*
           if-no-files-found: error
           retention-days: 14
 

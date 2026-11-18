@@ -9,6 +9,7 @@ const crypto=require('node:crypto');
 const http=require('node:http');
 const {execFile}=require('node:child_process');
 const {promisify}=require('node:util');
+const {autoUpdater}=require('electron-updater');
 
 const execFileAsync=promisify(execFile);
 const APP_ORIGIN='https://csconweb-remote.hatchable.site';
@@ -451,6 +452,35 @@ async function openLocalServer(){
     localServer.listen(EXTENSION_PORT,'127.0.0.1',()=>{localServer.removeListener('error',reject);resolve()});
   });
 }
+let updaterCheckTimer=null;
+let updaterInitialTimer=null;
+function setupAutoUpdater(){
+  if(!app.isPackaged||process.platform!=='win32')return;
+  autoUpdater.autoDownload=true;
+  autoUpdater.autoInstallOnAppQuit=true;
+  autoUpdater.allowPrerelease=false;
+  autoUpdater.on('checking-for-update',()=>console.log('Checking for DENVique updates.'));
+  autoUpdater.on('update-available',info=>{
+    console.log('DENVique update available:',info.version);
+    emitState('A DENVique update is downloading in the background. It will install when you close the app.');
+  });
+  autoUpdater.on('update-not-available',info=>console.log('DENVique is up to date:',info.version));
+  autoUpdater.on('update-downloaded',info=>{
+    console.log('DENVique update downloaded:',info.version);
+    emitState('A DENVique update is ready. It will install automatically after you close the app.');
+  });
+  autoUpdater.on('error',error=>console.error('DENVique automatic update error:',String(error&&error.message||error).slice(0,500)));
+  const check=()=>autoUpdater.checkForUpdates().catch(error=>{
+    console.error('DENVique update check failed:',String(error&&error.message||error).slice(0,500));
+  });
+  updaterInitialTimer=setTimeout(check,20000);
+  updaterCheckTimer=setInterval(check,4*60*60*1000);
+  app.on('will-quit',()=>{
+    if(updaterInitialTimer)clearTimeout(updaterInitialTimer);
+    if(updaterCheckTimer)clearInterval(updaterCheckTimer);
+  });
+}
+
 function makeMainWindow(){
   if(mainWindow&&!mainWindow.isDestroyed()){mainWindow.focus();return}
   mainWindow=new BrowserWindow({
@@ -458,7 +488,23 @@ function makeMainWindow(){
     title:'DENVique Desktop Monitor',
     webPreferences:{preload:path.join(__dirname,'preload.js'),partition:PARTITION,contextIsolation:true,nodeIntegration:false,sandbox:true}
   });
-  mainWindow.loadFile(path.join(__dirname,'index.html'));
+  mainWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  mainWindow.webContents.on('will-navigate',(event,url)=>{
+    try{
+      const target=new URL(url);
+      if(target.origin!==APP_ORIGIN||target.pathname!=='/desktop-monitor-app')event.preventDefault();
+    }catch(_){event.preventDefault()}
+  });
+  mainWindow.webContents.on('will-redirect',(event,url)=>{
+    try{
+      const target=new URL(url);
+      if(target.origin!==APP_ORIGIN||target.pathname!=='/desktop-monitor-app')event.preventDefault();
+    }catch(_){event.preventDefault()}
+  });
+  mainWindow.loadURL(APP_ORIGIN+'/desktop-monitor-app').catch(error=>{
+    console.error('Remote DENVique interface unavailable; loading bundled fallback:',String(error&&error.message||error));
+    if(mainWindow&&!mainWindow.isDestroyed())mainWindow.loadFile(path.join(__dirname,'index.html'));
+  });
   mainWindow.on('close',event=>{
     if(!monitoringSessionId||quitting)return;
     event.preventDefault();
@@ -489,6 +535,7 @@ app.whenReady().then(async()=>{
   deviceId=readOrCreateDeviceId();
   await openLocalServer().catch(error=>console.error('Local extension bridge unavailable:',error.message));
   makeMainWindow();
+  setupAutoUpdater();
   try{
     const user=await verifyLogin();
     if(user)startHeartbeatLoop();
