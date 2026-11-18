@@ -300,6 +300,7 @@ async function refreshState(){
   if(returnedSession)monitoringSessionId=returnedSession;
   else if(heartbeat.state==='outside_shift')monitoringSessionId=null;
   const wasActive=monitoringActive;
+  const wasPortalActive=portalAccessActive;
   portalAccessActive=heartbeat.portal_access_active===true&&
     heartbeat.access_session?.process_id===APP_INSTANCE_ID&&
     Number(heartbeat.access_session?.process_started_at||0)===APP_INSTANCE_STARTED_AT;
@@ -307,8 +308,12 @@ async function refreshState(){
   monitoringActive=currentUser.role==='employee'&&heartbeat.monitoring_active===true&&!breakActive;
 
   // Screen snapshots follow the activated desktop-access session, not the shift.
+  // A newly reconnected process sends an immediate snapshot before reopening access.
   if(!portalAccessActive)stopCaptureTimer();
-  else if(!captureTimer)scheduleCapture();
+  else if(portalAccessDesired&&!wasPortalActive){
+    const saved=await captureScreens();
+    scheduleCapture(saved?SCREEN_INTERVAL_MS:30000);
+  }else if(!captureTimer)scheduleCapture();
 
   // Foreground app/domain activity remains limited to active employee work sessions.
   if(!monitoringActive){
