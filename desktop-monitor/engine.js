@@ -513,10 +513,31 @@ async function openLocalServer(){
 }
 let updaterCheckTimer=null;
 let updaterInitialTimer=null;
+let signedWindowsUpdateCheck=null;
+function isNewerDesktopVersion(candidate,current){
+  const a=/^(\d+)\.(\d+)\.(\d+)$/.exec(String(candidate||''));
+  const b=/^(\d+)\.(\d+)\.(\d+)$/.exec(String(current||''));
+  if(!a||!b)return false;
+  for(let i=1;i<=3;i++){if(Number(a[i])>Number(b[i]))return true;if(Number(a[i])<Number(b[i]))return false;}
+  return false;
+}
+function approveSignedUpdateManifest(version,windowsAsset){
+  if(!/^\d+\.\d+\.\d+$/.test(String(version||'')) ||
+     !windowsAsset || windowsAsset.file!=='DENVique-Monitor-Setup.exe' ||
+     !/^[a-f0-9]{64}$/i.test(String(windowsAsset.sha256||'')))return false;
+  global.__DENViqueSignedUpdateVersion=String(version);
+  global.__DENViqueWindowsUpdateApproval={
+    version:String(version),
+    file:windowsAsset.file,
+    sha256:String(windowsAsset.sha256).toLowerCase()
+  };
+  if(signedWindowsUpdateCheck)signedWindowsUpdateCheck();
+  return true;
+}
 function setupAutoUpdater(){
   if(!app.isPackaged||process.platform!=='win32')return;
   autoUpdater.autoDownload=true;
-  autoUpdater.autoInstallOnAppQuit=true;
+  autoUpdater.autoInstallOnAppQuit=false;
   autoUpdater.allowPrerelease=false;
   autoUpdater.on('checking-for-update',()=>console.log('Checking for DENVique updates.'));
   autoUpdater.on('update-available',info=>{
@@ -524,14 +545,48 @@ function setupAutoUpdater(){
     emitState('A DENVique update is downloading in the background. It will install when you close the app.');
   });
   autoUpdater.on('update-not-available',info=>console.log('DENVique is up to date:',info.version));
-  autoUpdater.on('update-downloaded',info=>{
-    console.log('DENVique update downloaded:',info.version);
-    emitState('A DENVique update is ready. It will install automatically after you close the app.');
+  autoUpdater.on('update-downloaded',async info=>{
+    try{
+      const approval=global.__DENViqueWindowsUpdateApproval;
+      const helper=autoUpdater.downloadedUpdateHelper;
+      const downloadedFile=helper&&helper.file;
+      if(!approval||String(info.version)!==approval.version||!downloadedFile||
+         path.basename(downloadedFile)!==approval.file){
+        throw new Error('Downloaded installer does not match the signed release manifest.');
+      }
+      const digest=crypto.createHash('sha256');
+      await new Promise((resolve,reject)=>{
+        const stream=fs.createReadStream(downloadedFile);
+        stream.on('error',reject);
+        stream.on('data',chunk=>digest.update(chunk));
+        stream.on('end',resolve);
+      });
+      if(digest.digest('hex')!==approval.sha256){
+        try{fs.unlinkSync(downloadedFile)}catch(_){}
+        if(helper&&typeof helper.clear==='function')await helper.clear();
+        throw new Error('Downloaded Windows installer SHA-256 does not match the signed manifest.');
+      }
+      autoUpdater.autoInstallOnAppQuit=true;
+      console.log('Signed DENVique Windows installer verified:',info.version);
+      emitState('A verified DENVique update is ready. It will install automatically after you close the app.');
+    }catch(error){
+      autoUpdater.autoInstallOnAppQuit=false;
+      console.error('DENVique Windows update rejected:',String(error&&error.message||error));
+      emitState('A downloaded DENVique update failed verification and was not installed. The current version remains active.');
+    }
   });
   autoUpdater.on('error',error=>console.error('DENVique automatic update error:',String(error&&error.message||error).slice(0,500)));
-  const check=()=>autoUpdater.checkForUpdates().catch(error=>{
-    console.error('DENVique update check failed:',String(error&&error.message||error).slice(0,500));
-  });
+  const check=()=>{
+    const signedVersion=String(global.__DENViqueSignedUpdateVersion||'');
+    if(!isNewerDesktopVersion(signedVersion,app.getVersion())){
+      console.log('Windows updater waiting for a newer Ed25519-verified DENVique release.');
+      return Promise.resolve();
+    }
+    return autoUpdater.checkForUpdates().catch(error=>{
+      console.error('DENVique update check failed:',String(error&&error.message||error).slice(0,500));
+    });
+  };
+  signedWindowsUpdateCheck=check;
   updaterInitialTimer=setTimeout(check,20000);
   updaterCheckTimer=setInterval(check,5*60*1000);
   app.on('will-quit',()=>{
@@ -586,6 +641,9 @@ function makeMainWindow(){
   mainWindow.webContents.on('did-finish-load',()=>{
     firstPageLoaded=true;
     clearTimeout(startupFallback);
+    if(typeof global.__DENViqueMarkUpdateStartupSuccess==='function'){
+      global.__DENViqueMarkUpdateStartupSuccess();
+    }
     setTimeout(revealWindow,150);
   });
   mainWindow.webContents.on('did-fail-load',(_event,errorCode,errorDescription,validatedURL,isMainFrame)=>{
@@ -675,5 +733,8 @@ app.on('window-all-closed',()=>{if(process.platform!=='darwin'&&!monitoringActiv
 function notifyRuntimeUpdateReady(version){
   emitState('A verified DENVique monitoring update ('+String(version||'new version')+') is ready. It will activate automatically the next time you reopen the app; no new installer is needed.');
 }
+function notifyMacAppUpdateReady(version){
+  emitState('A complete DENVique app update ('+String(version||'new version')+') is ready. It will install automatically when you close the app, then reopen it.');
+}
 
-module.exports={notifyRuntimeUpdateReady};
+module.exports={notifyRuntimeUpdateReady,notifyMacAppUpdateReady,approveSignedUpdateManifest};

@@ -23,9 +23,16 @@ Use the Mac DMG or Windows installer from the latest GitHub release. The Mac app
 
 ## Automatic updates
 
-The employee interface is loaded from the live DENVique website, so page, layout, copy and server-side changes appear without reinstalling the desktop app. The monitoring engine is now kept separately from the stable Electron launcher: on both macOS and Windows, the launcher checks the latest DENVique GitHub release, downloads a newer engine over HTTPS, verifies its SHA-256 digest, and stages it in the app's private user-data folder. The verified engine becomes active automatically the next time the app is opened; employees do not need to download a new DMG or EXE for ordinary monitoring-engine changes.
+- The employee interface is loaded from the live DENVique website, so page, layout, copy and server-side changes appear without reinstalling the desktop app.
+- The launcher verifies a signed update manifest using a pinned Ed25519 public key before downloading any code. SHA-256 is checked separately for each downloaded artifact.
+- Monitoring-engine updates are downloaded and staged in the per-user data folder, then loaded the next time the app opens.
+- On Apple Silicon Macs, a separate shell updater waits for DENVique to exit, verifies the downloaded ZIP digest, validates the app bundle identifier/version and ad-hoc code-signature integrity, backs up the old bundle, replaces it and relaunches. If the new app does not acknowledge startup, the previous app bundle is restored.
+- If the app is installed in a protected location such as /Applications, macOS may request administrator authorization to replace it. This is a local permission prompt, not an Apple Developer subscription.
+- On Windows, the existing NSIS electron-updater downloads the installer in the background and applies it when the app exits.
 
-Windows also keeps the Electron / Chromium shell updater through the NSIS installer feed, which downloads updates in the background and installs them when the app exits. On macOS, updates to Electron / Chromium itself still require a new DMG at present: Apple's supported automatic updater requires a consistent Developer ID code signature, which this free ad-hoc-signed build does not have. Changes to the monitoring engine and the live website interface do not require that DMG.
+**Signing-key setup required for production updates:** add the contents of the local protected file ~/.denvique-keys/desktop-update-signing-private.pem to the GitHub repository Actions secret named DENVique_UPDATE_SIGNING_PRIVATE_KEY (Repository → Settings → Secrets and variables → Actions → New repository secret). Never commit or share the private key. Until this secret is set, the workflow publishes an unsigned update manifest and installed clients deliberately reject it; this prevents an unauthenticated update from executing.
+
+The first installer that includes this updater must be installed once on existing devices. After that bootstrap release, compatible full-app updates no longer require employees to download a new DMG manually. The macOS updater is implemented for Apple Silicon (ARM64); Intel Mac updates are not included in this build.
 
 ## Optional browser extension
 
