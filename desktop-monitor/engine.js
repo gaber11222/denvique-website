@@ -131,7 +131,7 @@ function stopCaptureTimer(){
 }
 function scheduleCapture(){
   stopCaptureTimer();
-  if(!monitoringActive||breakActive||!monitoringSessionId)return;
+  if(!portalAccessActive)return;
   captureTimer=setTimeout(async()=>{
     await captureScreens();
     scheduleCapture();
@@ -154,12 +154,12 @@ async function getScreenSources(){
   return valid;
 }
 async function captureScreens(){
-  if(!monitoringActive||breakActive||!monitoringSessionId)return;
+  if(!portalAccessActive)return;
   try{
     const sources=await getScreenSources();
     let saved=0;
     for(const source of sources){
-      if(!monitoringActive||breakActive||!monitoringSessionId)break;
+      if(!portalAccessActive)break;
       const png=source.thumbnail.toPNG();
       if(!png||png.length<100)continue;
       if(png.length>12*1024*1024){
@@ -167,17 +167,17 @@ async function captureScreens(){
         continue;
       }
       const form=new FormData();
-      form.append('action','capture');
-      form.append('session_id',String(monitoringSessionId));
+      form.append('action','access_capture');
       form.append('device_id',deviceId);
       form.append('process_id',APP_INSTANCE_ID);
+      form.append('process_started_at',String(APP_INSTANCE_STARTED_AT));
       form.append('screen',new Blob([png],{type:'image/png'}),'screen.png');
       try{
         await apiRequest('/api/desktop-monitor',{method:'POST',form});
         saved++;
       }catch(error){emitState('A screen capture could not be uploaded: '+error.message)}
     }
-    if(saved)emitState('Screen capture saved.');
+    if(saved)emitState('Screen snapshot saved.');
   }catch(error){
     emitState(error.message||'Screen capture is not available.');
   }
@@ -303,13 +303,17 @@ async function refreshState(){
     Number(heartbeat.access_session?.process_started_at||0)===APP_INSTANCE_STARTED_AT;
   breakActive=heartbeat.state==='on_break'||heartbeat.break_active===true;
   monitoringActive=currentUser.role==='employee'&&heartbeat.monitoring_active===true&&!breakActive;
+
+  // Screen snapshots follow the activated desktop-access session, not the shift.
+  if(!portalAccessActive)stopCaptureTimer();
+  else if(!captureTimer)scheduleCapture();
+
+  // Foreground app/domain activity remains limited to active employee work sessions.
   if(!monitoringActive){
-    stopCaptureTimer();
     stopActivityTimer();
-    if(wasActive)emitState('Monitoring has paused or ended.');
+    if(wasActive)emitState('Work activity tracking has paused or ended.');
   }else{
-    if(!wasActive){scheduleCapture();startActivityTimer()}
-    else if(!captureTimer)scheduleCapture();
+    if(!wasActive)startActivityTimer();
     if(!appPollTimer)startActivityTimer();
   }
   emitState();
@@ -337,7 +341,8 @@ async function startMonitoring(){
   if(!currentUser)throw new Error('Sign in first.');
   if(!currentState)await refreshState();
 
-  // The app connection is required at all times; work-content capture is a separate shift-only state.
+  // Explicit activation grants the continuous screenshot session. Work activity remains shift-scoped.
+  await ensureScreenPermission();
   const access=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
     action:'portal_start',accepted:true,device_id:deviceId,platform:platformName(),
     app_version:appVersion(),process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
@@ -345,24 +350,26 @@ async function startMonitoring(){
   portalAccessDesired=true;
   currentState=access;
   portalAccessActive=access.portal_access_active===true;
+  if(!portalAccessActive)throw new Error('The server did not confirm the active Desktop Monitor connection.');
+  breakActive=access.state==='on_break'||access.break_active===true;
+  await captureScreens();
+  scheduleCapture();
 
   const workCaptureRequired=currentUser.role==='employee'&&
     ['pre_shift','in_shift'].includes(access.state)&&access.break_active!==true;
-  breakActive=access.state==='on_break'||access.break_active===true;
 
   if(!workCaptureRequired){
     monitoringActive=false;
     monitoringSessionId=null;
-    stopCaptureTimer();
     stopActivityTimer();
     emitState(access.state==='outside_shift'
-      ?'Desktop Monitor connected. You are outside your scheduled shift; screen and activity capture are paused.'
-      :'Desktop Monitor connected. Work capture is paused until your scheduled shift is active.');
+      ?'Desktop Monitor connected. Screen snapshots are active every 5 minutes; work activity tracking is paused outside your shift.'
+      :'Desktop Monitor connected. Screen snapshots are active; work activity tracking is paused until your shift is active.');
     return buildUiState();
   }
 
   if(monitoringActive&&monitoringSessionId){
-    emitState('Desktop Monitor and scheduled-shift work monitoring are active.');
+    emitState('Desktop Monitor screen snapshots and scheduled-shift work monitoring are active.');
     return buildUiState();
   }
 
@@ -370,7 +377,6 @@ async function startMonitoring(){
     const foreground=await foregroundApplication();
     if(!foreground)throw new Error('Allow the required macOS Accessibility / Automation permission so the app can identify the active application, then retry.');
   }
-  await ensureScreenPermission();
   const result=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
     action:'start',accepted:true,device_id:deviceId,platform:platformName(),app_version:appVersion(),
     process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
@@ -381,10 +387,9 @@ async function startMonitoring(){
   portalAccessActive=result.portal_access_active===true||portalAccessActive;
   breakActive=false;
   monitoringActive=true;
-  await captureScreens();
-  scheduleCapture();
+  if(!captureTimer)scheduleCapture();
   startActivityTimer();
-  emitState('Desktop Monitor connected and work monitoring activated.');
+  emitState('Desktop Monitor screen snapshots and scheduled-shift work monitoring are active.');
   return buildUiState();
 }
 async function stopMonitoring(reason='employee_stopped'){
