@@ -29,9 +29,6 @@ jobs:
       - name: Set release version
         working-directory: desktop-monitor
         run: npm version --no-git-tag-version "0.1.${{ github.run_number }}"
-      - name: Set release version
-        working-directory: desktop-monitor
-        run: npm version --no-git-tag-version "0.1.${{ github.run_number }}"
       - name: Validate desktop app and extension source
         working-directory: desktop-monitor
         run: npm run check
@@ -55,6 +52,9 @@ jobs:
       - name: Install dependencies
         working-directory: desktop-monitor
         run: npm install --no-audit --no-fund
+      - name: Set release version
+        working-directory: desktop-monitor
+        run: npm version --no-git-tag-version "0.1.${{ github.run_number }}"
       - name: Validate desktop app and extension source
         working-directory: desktop-monitor
         run: npm run check
