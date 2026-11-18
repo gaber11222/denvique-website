@@ -31,7 +31,7 @@ function render(state){
  el.email.textContent=current.user&&current.user.email||'';
  el.platform.textContent=current.platform||'—';
  el.connection.textContent=current.agent_connected?'Connected':'Connecting…';
- el.browser.textContent=current.platform==='Windows'?(current.browser_extension_connected?'Connected':'Optional — not installed'):(current.platform==='macOS'?'Built-in domain integration':'Optional browser extension');
+ el.browser.textContent=current.platform==='Windows'?(current.browser_extension_connected?'Connected':'Extension required for website domains'):(current.platform==='macOS'?'Built-in domain integration':'Browser domain integration');
  const schedule=current.shift;
  const start=formatTime(schedule&&schedule.starts_at),end=formatTime(schedule&&schedule.ends_at);
  const stateName=current.state||'unknown';
@@ -39,28 +39,28 @@ function render(state){
  const workCaptureRequired=current.work_monitoring_required===true;
  const workActive=current.monitoring_active===true;
  if(el.meta)el.meta.classList.remove('hidden');
- if(el.extensionCard)el.extensionCard.classList.toggle('hidden',stateName==='outside_shift'||!workCaptureRequired);
- el.dot.className='dot'+(portalActive&&(!workCaptureRequired||workActive)?' active':' warn');
+ if(el.extensionCard)el.extensionCard.classList.toggle('hidden',!authenticated);
+ el.dot.className='dot'+(portalActive?' active':' warn');
  if(stateName==='outside_shift'){
   el.stateTitle.textContent='Outside scheduled shift';
   el.stateDetail.textContent=portalActive
-   ?'Desktop Monitor is connected. Screen snapshots and app / website activity are paused outside your shift.'
+   ?'Desktop Monitor is connected. App and website activity radar remains active outside your scheduled shift.'
    :'Activate Desktop Monitor to access DENVique, even outside scheduled shifts.';
  }else if(stateName==='pre_shift'){
   el.stateTitle.textContent=workActive?'Work monitoring active before shift':(portalActive?'Desktop Monitor connected':'Your shift is approaching');
   el.stateDetail.textContent='Scheduled start: '+start+(end?' · End: '+end:'');
  }else if(stateName==='on_break'){
   el.stateTitle.textContent=portalActive?'Desktop Monitor connected · recorded break':'Recorded break · app connection required';
-  el.stateDetail.textContent='Screen and activity capture are paused during this recorded break.';
+  el.stateDetail.textContent='App and website activity radar continues while Desktop Monitor remains activated.';
  }else if(stateName==='in_shift'){
-  el.stateTitle.textContent=workActive?'Work monitoring active':(portalActive?'Desktop Monitor connected · work capture required':'Shift in progress · app connection required');
+  el.stateTitle.textContent=workActive?'Shift monitoring active':(portalActive?'Desktop Monitor connected':'Shift in progress · app connection required');
   el.stateDetail.textContent='Scheduled shift: '+start+' – '+end;
  }else{
   el.stateTitle.textContent='Checking your schedule';
   el.stateDetail.textContent='Refresh to load the latest shift details.';
  }
  show('activation',authenticated&&(!portalActive||(workCaptureRequired&&!workActive)));
- show('monitoring',authenticated&&portalActive&&(!workCaptureRequired||workActive)&&!current.break_active);
+ show('monitoring',authenticated&&portalActive&&(!workCaptureRequired||workActive));
  show('break-state',authenticated&&portalActive&&current.break_active);
  el.start.disabled=!el.consent.checked;
  if(state.notice)status(state.notice);

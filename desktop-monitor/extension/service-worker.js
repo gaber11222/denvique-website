@@ -34,6 +34,13 @@ async function sendDomain(tabId){
     lastDomain='';lastSessionId='';lastTabId=null;
     return;
   }
+  // Only record a browser tab while that browser is the foreground application.
+  // The native app separately records the foreground application name.
+  const foreground=String(current.foreground_app||'');
+  if(!/(chrome|edge|firefox|brave|opera)/i.test(foreground)){
+    await closeCurrentDomain(tabId);
+    return;
+  }
   if(String(current.session_id)!==lastSessionId){
     lastSessionId=String(current.session_id);
     lastDomain='';
@@ -86,7 +93,9 @@ chrome.tabs.onUpdated.addListener((tabId,change,tab)=>{
 });
 chrome.tabs.onRemoved.addListener(tabId=>closeCurrentDomain(tabId));
 chrome.windows.onFocusChanged.addListener(windowId=>{
-  if(windowId!==chrome.windows.WINDOW_ID_NONE)activeTab();
+  if(windowId===chrome.windows.WINDOW_ID_NONE){
+    if(lastTabId!==null)closeCurrentDomain(lastTabId);
+  }else activeTab();
 });
 chrome.alarms.create('denvique-site-heartbeat',{periodInMinutes:0.5});
 chrome.alarms.onAlarm.addListener(activeTab);

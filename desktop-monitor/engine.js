@@ -1,6 +1,6 @@
 const {
   app, BrowserWindow, ipcMain, shell, dialog,
-  desktopCapturer, screen, systemPreferences, session
+  session
 }=require('electron');
 const path=require('node:path');
 const fs=require('node:fs');
@@ -16,11 +16,9 @@ const APP_ORIGIN='https://csconweb-remote.hatchable.site';
 const PARTITION='persist:denvique-desktop-monitor';
 const API_BASE=APP_ORIGIN;
 const DEVICE_FILE=()=>path.join(app.getPath('userData'),'device.json');
-const CAPTURE_STATE_FILE=()=>path.join(app.getPath('userData'),'screen-capture-state.json');
 const EXTENSION_PORT=43189;
 const APP_INSTANCE_ID=crypto.randomUUID();
 const APP_INSTANCE_STARTED_AT=Date.now();
-const SCREEN_INTERVAL_MS=90*60*1000;
 const HEARTBEAT_INTERVAL_MS=120*1000;
 const APP_POLL_INTERVAL_MS=15*1000;
 
@@ -28,8 +26,6 @@ let mainWindow=null;
 let loginWindow=null;
 let loginPoll=null;
 let heartbeatTimer=null;
-let captureTimer=null;
-let lastScreenCaptureAttemptAt=0;
 let appPollTimer=null;
 let monitoringSessionId=null;
 let monitoringActive=false;
@@ -103,15 +99,10 @@ function buildUiState(){
     break_active:breakActive,
     session_id:monitoringSessionId,
     device_id:deviceId,
-    screen_permission:screenPermissionStatus(),
     browser_extension_connected:browserExtensionSeenAt>0&&Date.now()-browserExtensionSeenAt<=90000,
     browser_extension_required:false,
     status_detail:state.state==='outside_shift'?'No current shift is scheduled.':state.state==='pre_shift'?'Your scheduled shift is approaching.':state.state==='on_break'?'Monitoring is paused for your recorded break.':state.state==='in_shift'?'Your scheduled shift is in progress.':'',
   };
-}
-function screenPermissionStatus(){
-  if(process.platform!=='darwin')return 'not_required';
-  try{return systemPreferences.getMediaAccessStatus('screen')}catch(_){return 'unknown'}
 }
 function readOrCreateDeviceId(){
   try{
@@ -126,117 +117,27 @@ function readOrCreateDeviceId(){
 }
 function platformName(){return process.platform==='darwin'?'macOS':process.platform==='win32'?'Windows':process.platform}
 function appVersion(){return app.getVersion()}
-function readLastScreenCaptureAttemptAt(){
-  try{
-    const state=JSON.parse(fs.readFileSync(CAPTURE_STATE_FILE(),'utf8'));
-    const value=Number(state&&state.lastAttemptAt);
-    return Math.max(lastScreenCaptureAttemptAt,Number.isFinite(value)&&value>0?value:0);
-  }catch(_){return lastScreenCaptureAttemptAt}
-}
-function recordScreenCaptureAttemptAt(timestamp){
-  const file=CAPTURE_STATE_FILE();
-  const folder=path.dirname(file);
-  fs.mkdirSync(folder,{recursive:true,mode:0o700});
-  const temporary=file+'.tmp';
-  fs.writeFileSync(temporary,JSON.stringify({lastAttemptAt:timestamp}),{mode:0o600});
-  fs.renameSync(temporary,file);
-}
-function screenCaptureCooldownMs(){
-  const last=readLastScreenCaptureAttemptAt();
-  if(!last)return 0;
-  const elapsed=Math.max(0,Date.now()-last);
-  return Math.max(0,SCREEN_INTERVAL_MS-elapsed);
-}
-function stateHasShift(){
-  return currentState&&['pre_shift','in_shift','on_break'].includes(currentState.state)&&currentState.shift;
-}
-function stopCaptureTimer(){
-  if(captureTimer){clearTimeout(captureTimer);captureTimer=null}
-}
-function scheduleCapture(){
-  stopCaptureTimer();
-  if(!portalAccessActive)return;
-  const waitMs=screenCaptureCooldownMs();
-  captureTimer=setTimeout(async()=>{
-    await captureScreens();
-    scheduleCapture();
-  },waitMs);
-}
-async function getScreenSources(){
-  const sources=await desktopCapturer.getSources({
-    types:['screen'],
-    thumbnailSize:{width:2560,height:1600},
-    fetchWindowIcons:false
-  });
-  const valid=sources.filter(source=>source.thumbnail&&!source.thumbnail.isEmpty());
-  if(!valid.length){
-    const status=screenPermissionStatus();
-    if(process.platform==='darwin'&&status!=='granted'){
-      throw new Error('Screen Recording permission is not available. Open macOS System Settings → Privacy & Security → Screen Recording, enable DENVique Desktop Monitor, then restart the application.');
-    }
-    throw new Error('No readable display was found. Check your screen-capture permissions and try again.');
-  }
-  return valid;
-}
-async function captureScreens(){
-  if(!portalAccessActive)return false;
-  if(screenCaptureCooldownMs()>0)return false;
-  try{
-    // Persist before asking Electron for a thumbnail so failures and app restarts
-    // cannot cause another capture attempt inside the 90-minute window.
-    const attemptAt=Date.now();
-    lastScreenCaptureAttemptAt=attemptAt;
-    recordScreenCaptureAttemptAt(attemptAt);
-    const sources=await getScreenSources();
-    if(!portalAccessActive)return false;
-    const source=sources[0];
-    if(!source)throw new Error('No readable display was found.');
-    const png=source.thumbnail.toPNG();
-    if(!png||png.length<100)throw new Error('The display did not produce a valid screen image.');
-    if(png.length>12*1024*1024){
-      emitState('A screen image was larger than the upload limit and was skipped.');
-      return false;
-    }
-    const form=new FormData();
-    form.append('action','access_capture');
-    form.append('device_id',deviceId);
-    form.append('process_id',APP_INSTANCE_ID);
-    form.append('process_started_at',String(APP_INSTANCE_STARTED_AT));
-    form.append('capture_batch_id',crypto.randomUUID());
-    form.append('capture_index','0');
-    form.append('screen',new Blob([png],{type:'image/png'}),'screen.png');
-    const result=await apiRequest('/api/desktop-monitor',{method:'POST',form});
-    if(result&&result.capture_skipped===true){
-      emitState('A recent screen snapshot is already stored. This capture was skipped.');
-      return false;
-    }
-    emitState('Screen snapshot saved.');
-    return true;
-  }catch(error){
-    emitState(error.message||'Screen capture is not available.');
-    return false;
-  }
-}
-async function sendActivity(eventType,itemName,source){
-  if(!monitoringActive||breakActive||!monitoringSessionId||!itemName)return false;
+async function sendAccessActivity(eventType,itemName,source,eventAction='opened'){
+  if(!portalAccessActive||!portalAccessSessionId||!currentUser)return false;
+  if(!['app','site'].includes(eventType)||!['opened','closed'].includes(eventAction))return false;
   try{
     await apiRequest('/api/desktop-monitor',{method:'POST',body:{
-      action:'event',session_id:monitoringSessionId,process_id:APP_INSTANCE_ID,event_type:eventType,
-      item_name:String(itemName).slice(0,180),domain:eventType==='site'?String(itemName).slice(0,180):null,
-      source:source||'desktop-agent'
+      action:'access_activity',event_type:eventType,event_action:eventAction,
+      item_name:String(itemName||'').slice(0,180),
+      domain:eventType==='site'?String(itemName||'').slice(0,180).toLowerCase():null,
+      source:source||'desktop-agent',device_id:deviceId,
+      process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
     }});
     return true;
   }catch(error){
-    if(!/no longer active|shift has ended|paused during/i.test(error.message))emitState('Activity update could not be saved: '+error.message);
+    if(!/not actively connected|session is no longer active/i.test(error.message)){
+      emitState('Activity update could not be saved: '+error.message);
+    }
     return false;
   }
 }
-async function endActivity(eventType){
-  if(!monitoringSessionId||!currentUser)return false;
-  try{
-    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'end_event',session_id:monitoringSessionId,process_id:APP_INSTANCE_ID,event_type:eventType}});
-    return true;
-  }catch(_){return false}
+async function endAccessActivity(eventType,source){
+  return sendAccessActivity(eventType,'',source||'desktop-agent','closed');
 }
 async function browserDomainForMac(appName){
   if(process.platform!=='darwin')return '';
@@ -284,24 +185,24 @@ async function foregroundApplication(){
   }
 }
 async function pollForegroundApp(){
-  if(!monitoringActive||breakActive||!monitoringSessionId){
+  if(!portalAccessActive||!portalAccessSessionId){
     currentAppName='';
     currentSiteDomain='';
     return;
   }
   const name=await foregroundApplication();
   if(name&&name!==currentAppName){
-    if(await sendActivity('app',name,'desktop-agent')){
+    if(await sendAccessActivity('app',name,'desktop-agent')){
       currentAppName=name;
-      emitState('Application activity updated.');
+      emitState('Foreground application activity updated.');
     }
   }
   if(process.platform==='darwin'){
     const domain=await browserDomainForMac(name);
     if(domain&&domain!==currentSiteDomain){
-      if(await sendActivity('site',domain,'macos-browser-automation'))currentSiteDomain=domain;
+      if(await sendAccessActivity('site',domain,'macos-browser-automation'))currentSiteDomain=domain;
     }else if(!domain&&currentSiteDomain){
-      if(await endActivity('site'))currentSiteDomain='';
+      if(await endAccessActivity('site','macos-browser-automation'))currentSiteDomain='';
     }
   }
 }
@@ -312,8 +213,13 @@ function startActivityTimer(){
 }
 function stopActivityTimer(){
   if(appPollTimer){clearInterval(appPollTimer);appPollTimer=null}
+  const hadApp=!!currentAppName,hadSite=!!currentSiteDomain;
   currentAppName='';
   currentSiteDomain='';
+  const closing=[];
+  if(hadApp)closing.push(endAccessActivity('app','desktop-agent'));
+  if(hadSite)closing.push(endAccessActivity('site',process.platform==='darwin'?'macos-browser-automation':'browser-extension'));
+  return Promise.all(closing);
 }
 async function refreshState(){
   if(!currentUser)return buildUiState();
@@ -332,8 +238,6 @@ async function refreshState(){
   const returnedSession=heartbeat.session&&Number(heartbeat.session.id);
   if(returnedSession)monitoringSessionId=returnedSession;
   else if(heartbeat.state==='outside_shift')monitoringSessionId=null;
-  const wasActive=monitoringActive;
-  const wasPortalActive=portalAccessActive;
   const previousPortalSessionId=portalAccessSessionId;
   portalAccessActive=heartbeat.portal_access_active===true&&
     heartbeat.access_session?.process_id===APP_INSTANCE_ID&&
@@ -343,50 +247,37 @@ async function refreshState(){
   breakActive=heartbeat.state==='on_break'||heartbeat.break_active===true;
   monitoringActive=currentUser.role==='employee'&&heartbeat.monitoring_active===true&&!breakActive;
 
-  // Screen snapshots follow the activated desktop-access session, not the shift.
-  // A newly created access session must get its own immediate first screenshot.
-  if(!portalAccessActive)stopCaptureTimer();
-  else if(portalAccessDesired&&(!wasPortalActive||portalSessionChanged)){
-    stopCaptureTimer();
-    const saved=await captureScreens();
-    scheduleCapture();
-  }else if(!captureTimer)scheduleCapture();
-
-  // Foreground app/domain activity remains limited to active employee work sessions.
-  if(!monitoringActive){
-    stopActivityTimer();
-    if(wasActive)emitState('Work activity tracking has paused or ended.');
-  }else{
-    if(!wasActive)startActivityTimer();
-    if(!appPollTimer)startActivityTimer();
+  // The activity radar follows explicit Desktop Monitor activation, not the shift.
+  // It therefore remains active outside shifts and during recorded breaks.
+  if(!portalAccessActive){
+    void stopActivityTimer();
+  }else if(portalSessionChanged){
+    if(appPollTimer)clearInterval(appPollTimer);
+    appPollTimer=null;
+    currentAppName='';
+    currentSiteDomain='';
+    startActivityTimer();
+  }else if(!appPollTimer){
+    startActivityTimer();
   }
   emitState();
   return buildUiState();
 }
 async function heartbeatLoop(){
   if(!currentUser)return;
-  try{await refreshState()}catch(error){monitoringActive=false;portalAccessActive=false;stopCaptureTimer();stopActivityTimer();emitState('Connection lost: '+error.message)}
+  try{await refreshState()}catch(error){monitoringActive=false;portalAccessActive=false;void stopActivityTimer();emitState('Connection lost: '+error.message)}
 }
 function startHeartbeatLoop(){
   if(heartbeatTimer)clearInterval(heartbeatTimer);
   heartbeatLoop();
   heartbeatTimer=setInterval(heartbeatLoop,HEARTBEAT_INTERVAL_MS);
 }
-async function ensureScreenPermission(){
-  if(process.platform==='darwin'){
-    const before=screenPermissionStatus();
-    if(before==='denied'||before==='restricted')throw new Error('Screen Recording is disabled. Open System Settings → Privacy & Security → Screen Recording, enable DENVique Desktop Monitor, then restart the app.');
-  }
-  await getScreenSources();
-  const after=screenPermissionStatus();
-  if(process.platform==='darwin'&&after!=='granted')throw new Error('Allow DENVique Desktop Monitor in macOS Screen Recording settings, then restart the app.');
-}
 async function startMonitoring(){
   if(!currentUser)throw new Error('Sign in first.');
   if(!currentState)await refreshState();
 
-  // Explicit activation grants the continuous screenshot session. Work activity remains shift-scoped.
-  await ensureScreenPermission();
+  // Explicit activation records foreground app names and active website domains.
+  // No screen capture, screen recording permission, or image upload is used.
   const access=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
     action:'portal_start',accepted:true,device_id:deviceId,platform:platformName(),
     app_version:appVersion(),process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
@@ -397,31 +288,25 @@ async function startMonitoring(){
   portalAccessSessionId=Number(access.access_session?.id||access.access_session_id||0)||null;
   if(!portalAccessActive)throw new Error('The server did not confirm the active Desktop Monitor connection.');
   breakActive=access.state==='on_break'||access.break_active===true;
-  const initialCaptureSaved=await captureScreens();
-  scheduleCapture();
+  startActivityTimer();
 
-  const workCaptureRequired=currentUser.role==='employee'&&
+  const workSessionRequired=currentUser.role==='employee'&&
     ['pre_shift','in_shift'].includes(access.state)&&access.break_active!==true;
 
-  if(!workCaptureRequired){
+  if(!workSessionRequired){
     monitoringActive=false;
     monitoringSessionId=null;
-    stopActivityTimer();
     emitState(access.state==='outside_shift'
-      ?'Desktop Monitor connected. Screen snapshots are active; work activity tracking is paused outside your shift.'
-      :'Desktop Monitor connected. Screen snapshots are active; work activity tracking is paused until your shift is active.');
+      ?'Desktop Monitor is active. App and website activity radar is running outside scheduled shifts.'
+      :'Desktop Monitor is active. App and website activity radar is running; shift-session monitoring is not due yet.');
     return buildUiState();
   }
 
   if(monitoringActive&&monitoringSessionId){
-    emitState('Desktop Monitor screen snapshots and scheduled-shift work monitoring are active.');
+    emitState('Desktop Monitor app and website activity radar is active. Shift monitoring is also active.');
     return buildUiState();
   }
 
-  if(process.platform==='darwin'){
-    const foreground=await foregroundApplication();
-    if(!foreground)throw new Error('Allow the required macOS Accessibility / Automation permission so the app can identify the active application, then retry.');
-  }
   const result=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
     action:'start',accepted:true,device_id:deviceId,platform:platformName(),app_version:appVersion(),
     process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
@@ -432,9 +317,8 @@ async function startMonitoring(){
   portalAccessActive=result.portal_access_active===true||portalAccessActive;
   breakActive=false;
   monitoringActive=true;
-  if(!captureTimer)scheduleCapture();
-  startActivityTimer();
-  emitState('Desktop Monitor screen snapshots and scheduled-shift work monitoring are active.');
+  if(!appPollTimer)startActivityTimer();
+  emitState('Desktop Monitor app and website activity radar is active, including outside the shift.');
   return buildUiState();
 }
 async function stopMonitoring(reason='employee_stopped'){
@@ -450,9 +334,8 @@ async function stopMonitoring(reason='employee_stopped'){
   portalAccessSessionId=null;
   breakActive=false;
   monitoringSessionId=null;
-  stopCaptureTimer();
-  stopActivityTimer();
-  emitState('Desktop Monitor connection and work monitoring stopped.');
+  await stopActivityTimer();
+  emitState('Desktop Monitor connection and app / website activity radar stopped.');
   return buildUiState();
 }
 function stopLoginPoll(){
@@ -485,7 +368,7 @@ async function signIn(){
 }
 async function signOut(){
   try{await stopMonitoring('signed_out')}catch(_){}
-  stopCaptureTimer();stopActivityTimer();
+  await stopActivityTimer();
   if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null}
   const cookie=await getCookieHeader();
   if(cookie){
@@ -530,7 +413,7 @@ async function openLocalServer(){
     if(req.method==='GET'&&req.url==='/state'){
       browserExtensionSeenAt=Date.now();
       res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});
-      return res.end(JSON.stringify({active:monitoringActive&&!breakActive,session_id:monitoringSessionId}));
+      return res.end(JSON.stringify({active:portalAccessActive,session_id:portalAccessSessionId,foreground_app:currentAppName}));
     }
     if(req.method==='POST'&&req.url==='/event'){
       if(String(req.headers['x-denvique-token']||'')!==localToken){res.writeHead(403);return res.end()}
@@ -539,9 +422,9 @@ async function openLocalServer(){
       req.on('end',async()=>{
         try{
           const body=JSON.parse(raw||'{}');
-          if(!monitoringActive||breakActive||!monitoringSessionId)throw new Error('monitoring_not_active');
+          if(!portalAccessActive||!portalAccessSessionId)throw new Error('monitoring_not_active');
           if(body.event_type==='site_end'){
-            await endActivity('site');
+            await endAccessActivity('site','browser-extension');
             currentSiteDomain='';
             res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,closed:true}));
             return;
@@ -549,8 +432,9 @@ async function openLocalServer(){
           if(body.event_type!=='site')throw new Error('site_event_required');
           const domain=String(body.domain||body.item_name||'').toLowerCase();
           if(!/^[a-z0-9.-]{1,180}$/.test(domain))throw new Error('valid_domain_required');
-          await sendActivity('site',domain,'browser-extension');
-          res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true}));
+          const saved=await sendAccessActivity('site',domain,'browser-extension');
+          res.writeHead(saved?200:409,{'Content-Type':'application/json'});
+          res.end(JSON.stringify(saved?{ok:true}:{error:'activity_not_saved'}));
         }catch(error){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:error.message}))}
       });
       return;
