@@ -1,19 +1,21 @@
 # DENVique Desktop Monitor
 
-DENVique Desktop Monitor is a signed-in desktop companion for employee shift attendance and consent-based work monitoring.
+DENVique Desktop Monitor is a signed-in desktop companion required for staff access to DENVique workspaces, including outside scheduled shifts.
 
 ## Capabilities
 
-- Authenticates using the DENVique employee account and existing Auth0 session.
+- Authenticates using the same active DENVique staff account (employee, team leader, quality, trainer, operations, account or executive) and the existing Auth0 login.
+- Maintains a short-interval, server-verified connection session whenever staff use DENVique workspaces, regardless of shift time.
 - Detects assigned shift windows, including the 30-minute pre-shift window.
-- Records full-screen captures from connected displays during an activated work session.
-- Records foreground application names only (not window titles or typed content).
+- Outside scheduled shifts, records only app connection state and connection timestamps; it does not capture screens, app names or website domains.
+- During an explicitly activated employee work shift, records full-screen captures from connected displays every five minutes.
+- During an explicitly activated employee work shift, records foreground application names and (when configured) website domains only, not window titles or typed content.
 - Supports a Chrome / Microsoft Edge extension that records website domains only.
-- Pauses capture and activity reporting during recorded breaks.
+- Pauses screen and activity capture during recorded breaks, while keeping the required portal connection active.
 - Stops when the shift ends, the employee checks out, or monitoring is stopped.
 - Does not use the camera or microphone for continuous monitoring.
 
-The employee sees the work-monitoring notice and actively enables the session. The application shows its current monitoring state.
+The staff member sees the access and monitoring notice and must actively enable the connection. If the app or its activation is lost while a DENVique workspace is open, the workspace locks until the app reconnects. The Executive portal records connection and reconnection timestamps. The desktop app's local status endpoint accepts only the DENVique site origin.
 
 ## Install
 

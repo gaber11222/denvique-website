@@ -20,7 +20,7 @@ const EXTENSION_PORT=43189;
 const APP_INSTANCE_ID=crypto.randomUUID();
 const APP_INSTANCE_STARTED_AT=Date.now();
 const SCREEN_INTERVAL_MS=5*60*1000;
-const HEARTBEAT_INTERVAL_MS=30*1000;
+const HEARTBEAT_INTERVAL_MS=4*1000;
 const APP_POLL_INTERVAL_MS=15*1000;
 
 let mainWindow=null;
@@ -31,6 +31,8 @@ let captureTimer=null;
 let appPollTimer=null;
 let monitoringSessionId=null;
 let monitoringActive=false;
+let portalAccessActive=false;
+let portalAccessDesired=false;
 let breakActive=false;
 let currentState=null;
 let currentUser=null;
@@ -73,7 +75,7 @@ async function verifyLogin(){
   });
   const data=await response.json().catch(()=>({}));
   if(!response.ok||!data.authenticated||!data.user)return null;
-  if(data.user.role!=='employee'||data.user.status!=='active')throw new Error('Only an active DENVique Employee account can use this application.');
+  if(!['employee','team_leader','quality_analyst','trainer','operations_manager','account_manager','executive_manager'].includes(data.user.role)||data.user.status!=='active')throw new Error('Only active DENVique staff accounts can use this application.');
   currentUser=data.user;
   return currentUser;
 }
@@ -86,12 +88,14 @@ function buildUiState(){
   const state=currentState||{};
   return {
     authenticated:!!currentUser,
-    user:currentUser?{full_name:currentUser.full_name||currentUser.name||'Employee',email:currentUser.email||''}:null,
+    user:currentUser?{full_name:currentUser.full_name||currentUser.name||'DENVique staff',email:currentUser.email||'',role:currentUser.role||''}:null,
     platform:process.platform==='darwin'?'macOS':process.platform==='win32'?'Windows':process.platform,
     state:state.state||'unknown',
     shift:state.shift||null,
     agent_connected:state.agent_connected===true,
     monitoring_active:monitoringActive,
+    portal_access_active:portalAccessActive,
+    work_monitoring_required:!!currentUser&&currentUser.role==='employee'&&!!currentState&&['pre_shift','in_shift'].includes(currentState.state)&&!breakActive,
     break_active:breakActive,
     session_id:monitoringSessionId,
     device_id:deviceId,
@@ -277,16 +281,27 @@ function stopActivityTimer(){
 }
 async function refreshState(){
   if(!currentUser)return buildUiState();
-  const heartbeat=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
+  let heartbeat=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
     action:'heartbeat',device_id:deviceId,platform:platformName(),app_version:appVersion(),
     process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT,session_id:monitoringSessionId||0
   }});
+  if(portalAccessDesired&&heartbeat.portal_access_active!==true){
+    const reconnect=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
+      action:'portal_start',accepted:true,device_id:deviceId,platform:platformName(),app_version:appVersion(),
+      process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
+    }});
+    heartbeat={...heartbeat,...reconnect};
+  }
   currentState=heartbeat;
   const returnedSession=heartbeat.session&&Number(heartbeat.session.id);
   if(returnedSession)monitoringSessionId=returnedSession;
+  else if(heartbeat.state==='outside_shift')monitoringSessionId=null;
   const wasActive=monitoringActive;
+  portalAccessActive=heartbeat.portal_access_active===true&&
+    heartbeat.access_session?.process_id===APP_INSTANCE_ID&&
+    Number(heartbeat.access_session?.process_started_at||0)===APP_INSTANCE_STARTED_AT;
   breakActive=heartbeat.state==='on_break'||heartbeat.break_active===true;
-  monitoringActive=heartbeat.monitoring_active===true&&!breakActive;
+  monitoringActive=currentUser.role==='employee'&&heartbeat.monitoring_active===true&&!breakActive;
   if(!monitoringActive){
     stopCaptureTimer();
     stopActivityTimer();
@@ -301,7 +316,7 @@ async function refreshState(){
 }
 async function heartbeatLoop(){
   if(!currentUser)return;
-  try{await refreshState()}catch(error){monitoringActive=false;stopCaptureTimer();stopActivityTimer();emitState('Connection lost: '+error.message)}
+  try{await refreshState()}catch(error){monitoringActive=false;portalAccessActive=false;stopCaptureTimer();stopActivityTimer();emitState('Connection lost: '+error.message)}
 }
 function startHeartbeatLoop(){
   if(heartbeatTimer)clearInterval(heartbeatTimer);
@@ -320,39 +335,72 @@ async function ensureScreenPermission(){
 async function startMonitoring(){
   if(!currentUser)throw new Error('Sign in first.');
   if(!currentState)await refreshState();
-  if(!stateHasShift())throw new Error('You are outside your scheduled shift window.');
-  if(breakActive||currentState.state==='on_break')throw new Error('Monitoring stays paused during your recorded break.');
-  if(monitoringActive)return buildUiState();
+
+  // The app connection is required at all times; work-content capture is a separate shift-only state.
+  const access=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
+    action:'portal_start',accepted:true,device_id:deviceId,platform:platformName(),
+    app_version:appVersion(),process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
+  }});
+  portalAccessDesired=true;
+  currentState=access;
+  portalAccessActive=access.portal_access_active===true;
+
+  const workCaptureRequired=currentUser.role==='employee'&&
+    ['pre_shift','in_shift'].includes(access.state)&&access.break_active!==true;
+  breakActive=access.state==='on_break'||access.break_active===true;
+
+  if(!workCaptureRequired){
+    monitoringActive=false;
+    monitoringSessionId=null;
+    stopCaptureTimer();
+    stopActivityTimer();
+    emitState(access.state==='outside_shift'
+      ?'Desktop Monitor connected. You are outside your scheduled shift; screen and activity capture are paused.'
+      :'Desktop Monitor connected. Work capture is paused until your scheduled shift is active.');
+    return buildUiState();
+  }
+
+  if(monitoringActive&&monitoringSessionId){
+    emitState('Desktop Monitor and scheduled-shift work monitoring are active.');
+    return buildUiState();
+  }
+
   if(process.platform==='darwin'){
     const foreground=await foregroundApplication();
     if(!foreground)throw new Error('Allow the required macOS Accessibility / Automation permission so the app can identify the active application, then retry.');
   }
   await ensureScreenPermission();
   const result=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
-    action:'start',accepted:true,device_id:deviceId,platform:platformName(),app_version:appVersion(),process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
+    action:'start',accepted:true,device_id:deviceId,platform:platformName(),app_version:appVersion(),
+    process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
   }});
   currentState=result;
-  monitoringSessionId=Number(result.session&&result.session.id)||Number(result.session&&result.session.shift_id&&result.session.id)||null;
+  monitoringSessionId=Number(result.session&&result.session.id)||null;
   if(!monitoringSessionId)throw new Error('DENVique did not return a monitoring session identifier.');
+  portalAccessActive=result.portal_access_active===true||portalAccessActive;
   breakActive=false;
   monitoringActive=true;
   await captureScreens();
   scheduleCapture();
   startActivityTimer();
-  emitState('Work monitoring activated.');
+  emitState('Desktop Monitor connected and work monitoring activated.');
   return buildUiState();
 }
 async function stopMonitoring(reason='employee_stopped'){
-  if(monitoringSessionId&&currentUser){
-    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId,device_id:deviceId,process_id:APP_INSTANCE_ID,reason:reason||'employee_stopped'}});
+  portalAccessDesired=false;
+  if(currentUser&&monitoringSessionId){
+    try{await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId,device_id:deviceId,process_id:APP_INSTANCE_ID,reason:reason||'employee_stopped'}})}catch(error){emitState('Shift monitoring could not be stopped cleanly: '+error.message)}
+  }
+  if(currentUser&&portalAccessActive){
+    try{await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'portal_stop',device_id:deviceId,process_id:APP_INSTANCE_ID,reason:reason||'employee_stopped'}})}catch(error){emitState('Desktop Monitor connection could not be closed cleanly: '+error.message)}
   }
   monitoringActive=false;
+  portalAccessActive=false;
   breakActive=false;
   monitoringSessionId=null;
   stopCaptureTimer();
   stopActivityTimer();
-  await heartbeatLoop().catch(()=>{});
-  emitState('Work monitoring stopped.');
+  emitState('Desktop Monitor connection and work monitoring stopped.');
   return buildUiState();
 }
 function stopLoginPoll(){
@@ -377,16 +425,14 @@ async function signIn(){
         stopLoginPoll();
         if(loginWindow&&!loginWindow.isDestroyed())loginWindow.close();
         startHeartbeatLoop();
-        emitState('DENVique employee account connected.');
+        emitState('DENVique staff account connected.');
       }
     }catch(error){emitState(error.message)}
   },1200);
   return {ok:true};
 }
 async function signOut(){
-  if(monitoringSessionId){
-    try{await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId,device_id:deviceId,process_id:APP_INSTANCE_ID,reason:'signed_out'}})}catch(_){}
-  }
+  try{await stopMonitoring('signed_out')}catch(_){}
   stopCaptureTimer();stopActivityTimer();
   if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null}
   const cookie=await getCookieHeader();
@@ -394,7 +440,7 @@ async function signOut(){
     try{await fetch(API_BASE+'/api/auth0/session',{method:'DELETE',headers:{Origin:APP_ORIGIN,Cookie:cookie,Accept:'application/json'}})}catch(_){}
   }
   try{await getPartition().cookies.remove(APP_ORIGIN,'denvique_auth0_session')}catch(_){}
-  currentUser=null;currentState=null;monitoringActive=false;breakActive=false;monitoringSessionId=null;
+  currentUser=null;currentState=null;monitoringActive=false;portalAccessActive=false;portalAccessDesired=false;breakActive=false;monitoringSessionId=null;
   emitState('Signed out.');
   return buildUiState();
 }
@@ -402,7 +448,9 @@ async function openLocalServer(){
   if(localServer)return;
   localServer=http.createServer(async(req,res)=>{
     const origin=String(req.headers.origin||'');
-    const allowed=/^chrome-extension:\/\/[a-p]{32}$/.test(origin);
+    const extensionAllowed=/^chrome-extension:\/\/[a-p]{32}$/.test(origin);
+    const siteAllowed=origin===APP_ORIGIN;
+    const allowed=extensionAllowed||siteAllowed;
     if(allowed){
       res.setHeader('Access-Control-Allow-Origin',origin);
       res.setHeader('Vary','Origin');
@@ -412,7 +460,17 @@ async function openLocalServer(){
       res.setHeader('Access-Control-Max-Age','600');
     }
     if(req.method==='OPTIONS'){res.writeHead(allowed?204:403);return res.end()}
-    if(!allowed){res.writeHead(403,{'Content-Type':'application/json'});return res.end(JSON.stringify({error:'extension_origin_required'}))}
+    if(siteAllowed&&req.method==='GET'&&req.url==='/portal-state'){
+      res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
+      return res.end(JSON.stringify({
+        running:true,authenticated:!!currentUser,
+        current_user_id:currentUser?String(currentUser.user_id||currentUser.id||''):'',
+        portal_active:portalAccessActive===true,
+        monitoring_active:monitoringActive===true,
+        device_id:deviceId,process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
+      }));
+    }
+    if(!extensionAllowed){res.writeHead(403,{'Content-Type':'application/json'});return res.end(JSON.stringify({error:'extension_origin_required'}))}
     if(req.method==='GET'&&req.url==='/config'){
       res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});
       return res.end(JSON.stringify({token:localToken}));
@@ -552,12 +610,12 @@ function makeMainWindow(){
   });
   mainWindow.loadURL(APP_ORIGIN+'/desktop-monitor-app').catch(loadBundledFallback);
   mainWindow.on('close',event=>{
-    if(!monitoringSessionId||quitting)return;
+    if((!portalAccessActive&&!monitoringSessionId)||quitting)return;
     event.preventDefault();
     dialog.showMessageBox(mainWindow,{
-      type:'warning',buttons:['Keep app open','Stop monitoring and close'],defaultId:0,cancelId:0,
-      title:'Work-monitoring session is active',
-      message:'Stop the current work-monitoring session before closing DENVique Desktop Monitor.'
+      type:'warning',buttons:['Keep app open','Disconnect and close'],defaultId:0,cancelId:0,
+      title:'DENVique Desktop Monitor is connected',
+      message:'Disconnect Desktop Monitor before closing the application. DENVique workspaces will lock until you reconnect.'
     }).then(result=>{
       if(result.response===1)stopMonitoring('app_closed').then(()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.destroy()}).catch(error=>emitState(error.message));
     });
@@ -606,7 +664,7 @@ app.on('open-url',(event,url)=>{event.preventDefault();if(url.startsWith('denviq
 let quitting=false;
 app.on('before-quit',event=>{
   if(quitting)return;
-  if(monitoringSessionId){
+  if(portalAccessActive||monitoringSessionId){
     event.preventDefault();
     stopMonitoring('app_closed').finally(()=>{quitting=true;app.quit()});
   }

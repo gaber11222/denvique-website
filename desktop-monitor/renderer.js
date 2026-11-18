@@ -26,7 +26,7 @@ function render(state){
  const authenticated=!!current.authenticated;
  el.signedOut.classList.toggle('hidden',authenticated);
  el.signedIn.classList.toggle('hidden',!authenticated);
- if(!authenticated){status('Sign in with your DENVique employee credentials to connect this device.');return}
+ if(!authenticated){status('Sign in with the same DENVique staff account used for your workspace.');return}
  el.name.textContent=current.user&&current.user.full_name||'Employee';
  el.email.textContent=current.user&&current.user.email||'';
  el.platform.textContent=current.platform||'—';
@@ -35,29 +35,33 @@ function render(state){
  const schedule=current.shift;
  const start=formatTime(schedule&&schedule.starts_at),end=formatTime(schedule&&schedule.ends_at);
  const stateName=current.state||'unknown';
- const outsideShift=stateName==='outside_shift';
- if(el.meta)el.meta.classList.toggle('hidden',outsideShift);
- if(el.extensionCard)el.extensionCard.classList.toggle('hidden',outsideShift);
- el.dot.className='dot'+(current.monitoring_active?' active':(stateName==='outside_shift'?'':' warn'));
+ const portalActive=current.portal_access_active===true;
+ const workCaptureRequired=current.work_monitoring_required===true;
+ const workActive=current.monitoring_active===true;
+ if(el.meta)el.meta.classList.remove('hidden');
+ if(el.extensionCard)el.extensionCard.classList.toggle('hidden',stateName==='outside_shift'||!workCaptureRequired);
+ el.dot.className='dot'+(portalActive&&(!workCaptureRequired||workActive)?' active':' warn');
  if(stateName==='outside_shift'){
   el.stateTitle.textContent='Outside scheduled shift';
-  el.stateDetail.textContent='No work-monitoring session is active.';
+  el.stateDetail.textContent=portalActive
+   ?'Desktop Monitor is connected. Screen snapshots and app / website activity are paused outside your shift.'
+   :'Activate Desktop Monitor to access DENVique, even outside scheduled shifts.';
  }else if(stateName==='pre_shift'){
-  el.stateTitle.textContent=current.monitoring_active?'Monitoring active before shift':'Your shift is approaching';
+  el.stateTitle.textContent=workActive?'Work monitoring active before shift':(portalActive?'Desktop Monitor connected':'Your shift is approaching');
   el.stateDetail.textContent='Scheduled start: '+start+(end?' · End: '+end:'');
  }else if(stateName==='on_break'){
-  el.stateTitle.textContent='Recorded break';
-  el.stateDetail.textContent='Work monitoring is paused for this break.';
+  el.stateTitle.textContent=portalActive?'Desktop Monitor connected · recorded break':'Recorded break · app connection required';
+  el.stateDetail.textContent='Screen and activity capture are paused during this recorded break.';
  }else if(stateName==='in_shift'){
-  el.stateTitle.textContent=current.monitoring_active?'Monitoring active':'Shift in progress';
+  el.stateTitle.textContent=workActive?'Work monitoring active':(portalActive?'Desktop Monitor connected · work capture required':'Shift in progress · app connection required');
   el.stateDetail.textContent='Scheduled shift: '+start+' – '+end;
  }else{
   el.stateTitle.textContent='Checking your schedule';
   el.stateDetail.textContent='Refresh to load the latest shift details.';
  }
- show('activation',authenticated&&['pre_shift','in_shift'].includes(stateName)&&!current.monitoring_active);
- show('monitoring',authenticated&&current.monitoring_active&&!current.break_active);
- show('break-state',authenticated&&current.break_active);
+ show('activation',authenticated&&(!portalActive||(workCaptureRequired&&!workActive)));
+ show('monitoring',authenticated&&portalActive&&(!workCaptureRequired||workActive)&&!current.break_active);
+ show('break-state',authenticated&&portalActive&&current.break_active);
  el.start.disabled=!el.consent.checked;
  if(state.notice)status(state.notice);
 }
@@ -70,8 +74,8 @@ async function invoke(fn,success){
 }
 el.signIn.addEventListener('click',()=>invoke(()=>api.signIn(),'Opening secure DENVique sign-in…'));
 el.signOut.addEventListener('click',()=>invoke(()=>api.signOut(),'Signed out.'));
-el.start.addEventListener('click',()=>invoke(()=>api.start(),'Work monitoring is active.'));
-el.stop.addEventListener('click',()=>invoke(()=>api.stop(),'Work monitoring has stopped.'));
+el.start.addEventListener('click',()=>invoke(()=>api.start(),'DENVique Desktop Monitor is active.'));
+el.stop.addEventListener('click',()=>invoke(()=>api.stop(),'Desktop Monitor disconnected. DENVique workspace access is locked.'));
 el.refresh.addEventListener('click',()=>invoke(()=>api.refresh(),'Status refreshed.'));
 el.openCheckin.addEventListener('click',()=>api.openCheckin());
 el.extension.addEventListener('click',()=>invoke(()=>api.openExtensionFolder(),'Extension folder opened.'));
