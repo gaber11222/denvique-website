@@ -16,10 +16,11 @@ const APP_ORIGIN='https://csconweb-remote.hatchable.site';
 const PARTITION='persist:denvique-desktop-monitor';
 const API_BASE=APP_ORIGIN;
 const DEVICE_FILE=()=>path.join(app.getPath('userData'),'device.json');
+const CAPTURE_STATE_FILE=()=>path.join(app.getPath('userData'),'screen-capture-state.json');
 const EXTENSION_PORT=43189;
 const APP_INSTANCE_ID=crypto.randomUUID();
 const APP_INSTANCE_STARTED_AT=Date.now();
-const SCREEN_INTERVAL_MS=5*60*1000;
+const SCREEN_INTERVAL_MS=90*60*1000;
 const HEARTBEAT_INTERVAL_MS=120*1000;
 const APP_POLL_INTERVAL_MS=15*1000;
 
@@ -124,6 +125,27 @@ function readOrCreateDeviceId(){
 }
 function platformName(){return process.platform==='darwin'?'macOS':process.platform==='win32'?'Windows':process.platform}
 function appVersion(){return app.getVersion()}
+function readLastScreenCaptureAttemptAt(){
+  try{
+    const state=JSON.parse(fs.readFileSync(CAPTURE_STATE_FILE(),'utf8'));
+    const value=Number(state&&state.lastAttemptAt);
+    return Number.isFinite(value)&&value>0?value:0;
+  }catch(_){return 0}
+}
+function recordScreenCaptureAttemptAt(timestamp){
+  const file=CAPTURE_STATE_FILE();
+  const folder=path.dirname(file);
+  fs.mkdirSync(folder,{recursive:true,mode:0o700});
+  const temporary=file+'.tmp';
+  fs.writeFileSync(temporary,JSON.stringify({lastAttemptAt:timestamp}),{mode:0o600});
+  fs.renameSync(temporary,file);
+}
+function screenCaptureCooldownMs(){
+  const last=readLastScreenCaptureAttemptAt();
+  if(!last)return 0;
+  const elapsed=Math.max(0,Date.now()-last);
+  return Math.max(0,SCREEN_INTERVAL_MS-elapsed);
+}
 function stateHasShift(){
   return currentState&&['pre_shift','in_shift','on_break'].includes(currentState.state)&&currentState.shift;
 }
@@ -133,10 +155,12 @@ function stopCaptureTimer(){
 function scheduleCapture(delay=SCREEN_INTERVAL_MS){
   stopCaptureTimer();
   if(!portalAccessActive)return;
+  const requestedDelay=Math.max(0,Number(delay)||0);
+  const waitMs=Math.max(requestedDelay,screenCaptureCooldownMs());
   captureTimer=setTimeout(async()=>{
-    const saved=await captureScreens();
-    scheduleCapture(saved?SCREEN_INTERVAL_MS:30000);
-  },delay);
+    await captureScreens();
+    scheduleCapture(SCREEN_INTERVAL_MS);
+  },waitMs);
 }
 async function getScreenSources(){
   const sources=await desktopCapturer.getSources({
@@ -156,34 +180,36 @@ async function getScreenSources(){
 }
 async function captureScreens(){
   if(!portalAccessActive)return false;
+  if(screenCaptureCooldownMs()>0)return false;
+  // Persist before asking Electron for a thumbnail so failures and app restarts
+  // cannot cause another capture attempt inside the 90-minute window.
+  recordScreenCaptureAttemptAt(Date.now());
   try{
     const sources=await getScreenSources();
-    const captureBatchId=crypto.randomUUID();
-    let saved=0;
-    for(let captureIndex=0;captureIndex<sources.length&&captureIndex<8;captureIndex++){
-      const source=sources[captureIndex];
-      if(!portalAccessActive)break;
-      const png=source.thumbnail.toPNG();
-      if(!png||png.length<100)continue;
-      if(png.length>12*1024*1024){
-        emitState('A screen image was larger than the upload limit and was skipped.');
-        continue;
-      }
-      const form=new FormData();
-      form.append('action','access_capture');
-      form.append('device_id',deviceId);
-      form.append('process_id',APP_INSTANCE_ID);
-      form.append('process_started_at',String(APP_INSTANCE_STARTED_AT));
-      form.append('capture_batch_id',captureBatchId);
-      form.append('capture_index',String(captureIndex));
-      form.append('screen',new Blob([png],{type:'image/png'}),'screen.png');
-      try{
-        await apiRequest('/api/desktop-monitor',{method:'POST',form});
-        saved++;
-      }catch(error){emitState('A screen capture could not be uploaded: '+error.message)}
+    if(!portalAccessActive)return false;
+    const source=sources[0];
+    if(!source)throw new Error('No readable display was found.');
+    const png=source.thumbnail.toPNG();
+    if(!png||png.length<100)throw new Error('The display did not produce a valid screen image.');
+    if(png.length>12*1024*1024){
+      emitState('A screen image was larger than the upload limit and was skipped.');
+      return false;
     }
-    if(saved)emitState('Screen snapshot saved.');
-    return saved>0;
+    const form=new FormData();
+    form.append('action','access_capture');
+    form.append('device_id',deviceId);
+    form.append('process_id',APP_INSTANCE_ID);
+    form.append('process_started_at',String(APP_INSTANCE_STARTED_AT));
+    form.append('capture_batch_id',crypto.randomUUID());
+    form.append('capture_index','0');
+    form.append('screen',new Blob([png],{type:'image/png'}),'screen.png');
+    const result=await apiRequest('/api/desktop-monitor',{method:'POST',form});
+    if(result&&result.capture_skipped===true){
+      emitState('A recent screen snapshot is already stored. This capture was skipped.');
+      return false;
+    }
+    emitState('Screen snapshot saved.');
+    return true;
   }catch(error){
     emitState(error.message||'Screen capture is not available.');
     return false;
@@ -321,7 +347,7 @@ async function refreshState(){
   else if(portalAccessDesired&&(!wasPortalActive||portalSessionChanged)){
     stopCaptureTimer();
     const saved=await captureScreens();
-    scheduleCapture(saved?SCREEN_INTERVAL_MS:30000);
+    scheduleCapture(SCREEN_INTERVAL_MS);
   }else if(!captureTimer)scheduleCapture();
 
   // Foreground app/domain activity remains limited to active employee work sessions.
@@ -370,7 +396,7 @@ async function startMonitoring(){
   if(!portalAccessActive)throw new Error('The server did not confirm the active Desktop Monitor connection.');
   breakActive=access.state==='on_break'||access.break_active===true;
   const initialCaptureSaved=await captureScreens();
-  scheduleCapture(initialCaptureSaved?SCREEN_INTERVAL_MS:30000);
+  scheduleCapture(SCREEN_INTERVAL_MS);
 
   const workCaptureRequired=currentUser.role==='employee'&&
     ['pre_shift','in_shift'].includes(access.state)&&access.break_active!==true;
@@ -380,7 +406,7 @@ async function startMonitoring(){
     monitoringSessionId=null;
     stopActivityTimer();
     emitState(access.state==='outside_shift'
-      ?'Desktop Monitor connected. Screen snapshots are active every 5 minutes; work activity tracking is paused outside your shift.'
+      ?'Desktop Monitor connected. Screen snapshots are active; work activity tracking is paused outside your shift.'
       :'Desktop Monitor connected. Screen snapshots are active; work activity tracking is paused until your shift is active.');
     return buildUiState();
   }
