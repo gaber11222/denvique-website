@@ -29,6 +29,7 @@ let loginWindow=null;
 let loginPoll=null;
 let heartbeatTimer=null;
 let captureTimer=null;
+let lastScreenCaptureAttemptAt=0;
 let appPollTimer=null;
 let monitoringSessionId=null;
 let monitoringActive=false;
@@ -129,8 +130,8 @@ function readLastScreenCaptureAttemptAt(){
   try{
     const state=JSON.parse(fs.readFileSync(CAPTURE_STATE_FILE(),'utf8'));
     const value=Number(state&&state.lastAttemptAt);
-    return Number.isFinite(value)&&value>0?value:0;
-  }catch(_){return 0}
+    return Math.max(lastScreenCaptureAttemptAt,Number.isFinite(value)&&value>0?value:0);
+  }catch(_){return lastScreenCaptureAttemptAt}
 }
 function recordScreenCaptureAttemptAt(timestamp){
   const file=CAPTURE_STATE_FILE();
@@ -152,14 +153,13 @@ function stateHasShift(){
 function stopCaptureTimer(){
   if(captureTimer){clearTimeout(captureTimer);captureTimer=null}
 }
-function scheduleCapture(delay=SCREEN_INTERVAL_MS){
+function scheduleCapture(){
   stopCaptureTimer();
   if(!portalAccessActive)return;
-  const requestedDelay=Math.max(0,Number(delay)||0);
-  const waitMs=Math.max(requestedDelay,screenCaptureCooldownMs());
+  const waitMs=screenCaptureCooldownMs();
   captureTimer=setTimeout(async()=>{
     await captureScreens();
-    scheduleCapture(SCREEN_INTERVAL_MS);
+    scheduleCapture();
   },waitMs);
 }
 async function getScreenSources(){
@@ -181,10 +181,12 @@ async function getScreenSources(){
 async function captureScreens(){
   if(!portalAccessActive)return false;
   if(screenCaptureCooldownMs()>0)return false;
-  // Persist before asking Electron for a thumbnail so failures and app restarts
-  // cannot cause another capture attempt inside the 90-minute window.
-  recordScreenCaptureAttemptAt(Date.now());
   try{
+    // Persist before asking Electron for a thumbnail so failures and app restarts
+    // cannot cause another capture attempt inside the 90-minute window.
+    const attemptAt=Date.now();
+    lastScreenCaptureAttemptAt=attemptAt;
+    recordScreenCaptureAttemptAt(attemptAt);
     const sources=await getScreenSources();
     if(!portalAccessActive)return false;
     const source=sources[0];
@@ -347,7 +349,7 @@ async function refreshState(){
   else if(portalAccessDesired&&(!wasPortalActive||portalSessionChanged)){
     stopCaptureTimer();
     const saved=await captureScreens();
-    scheduleCapture(SCREEN_INTERVAL_MS);
+    scheduleCapture();
   }else if(!captureTimer)scheduleCapture();
 
   // Foreground app/domain activity remains limited to active employee work sessions.
@@ -396,7 +398,7 @@ async function startMonitoring(){
   if(!portalAccessActive)throw new Error('The server did not confirm the active Desktop Monitor connection.');
   breakActive=access.state==='on_break'||access.break_active===true;
   const initialCaptureSaved=await captureScreens();
-  scheduleCapture(SCREEN_INTERVAL_MS);
+  scheduleCapture();
 
   const workCaptureRequired=currentUser.role==='employee'&&
     ['pre_shift','in_shift'].includes(access.state)&&access.break_active!==true;
