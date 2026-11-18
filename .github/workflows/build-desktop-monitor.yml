@@ -69,13 +69,26 @@ jobs:
           retention-days: 14
 
   publish-release:
-    needs: [build-mac, build-windows]
+    needs: [build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: DENVique-Monitor-Windows-x64
           path: release-assets
-          merge-multiple: true
+      - name: Include the latest compatible Mac package
+        run: |
+          set -euo pipefail
+          base="https://github.com/gaber11222/denvique-website/releases/download/desktop-monitor-30"
+          for file in \
+            DENVique-Monitor-mac-arm64.dmg \
+            DENVique-Monitor-mac-arm64.dmg.blockmap \
+            DENVique-Monitor-mac-arm64.zip \
+            DENVique-Monitor-mac-arm64.zip.blockmap \
+            latest-mac.yml
+          do
+            curl --fail --location --silent --show-error "$base/$file" -o "release-assets/$file"
+          done
       - name: Publish latest desktop installers
         uses: softprops/action-gh-release@v2
         with:
