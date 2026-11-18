@@ -17,6 +17,7 @@ const API_BASE=APP_ORIGIN;
 const DEVICE_FILE=()=>path.join(app.getPath('userData'),'device.json');
 const EXTENSION_PORT=43189;
 const APP_INSTANCE_ID=crypto.randomUUID();
+const APP_INSTANCE_STARTED_AT=Date.now();
 const SCREEN_INTERVAL_MS=5*60*1000;
 const HEARTBEAT_INTERVAL_MS=30*1000;
 const APP_POLL_INTERVAL_MS=15*1000;
@@ -277,7 +278,7 @@ async function refreshState(){
   if(!currentUser)return buildUiState();
   const heartbeat=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
     action:'heartbeat',device_id:deviceId,platform:platformName(),app_version:appVersion(),
-    process_id:APP_INSTANCE_ID,session_id:monitoringSessionId||0
+    process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT,session_id:monitoringSessionId||0
   }});
   currentState=heartbeat;
   const returnedSession=heartbeat.session&&Number(heartbeat.session.id);
@@ -327,7 +328,7 @@ async function startMonitoring(){
   }
   await ensureScreenPermission();
   const result=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
-    action:'start',accepted:true,device_id:deviceId,platform:platformName(),app_version:appVersion(),process_id:APP_INSTANCE_ID
+    action:'start',accepted:true,device_id:deviceId,platform:platformName(),app_version:appVersion(),process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
   }});
   currentState=result;
   monitoringSessionId=Number(result.session&&result.session.id)||Number(result.session&&result.session.shift_id&&result.session.id)||null;
