@@ -163,6 +163,7 @@ async function captureScreens(){
       form.append('action','capture');
       form.append('session_id',String(monitoringSessionId));
       form.append('device_id',deviceId);
+      form.append('process_id',APP_INSTANCE_ID);
       form.append('screen',new Blob([png],{type:'image/png'}),'screen.png');
       try{
         await apiRequest('/api/desktop-monitor',{method:'POST',form});
@@ -178,7 +179,7 @@ async function sendActivity(eventType,itemName,source){
   if(!monitoringActive||breakActive||!monitoringSessionId||!itemName)return false;
   try{
     await apiRequest('/api/desktop-monitor',{method:'POST',body:{
-      action:'event',session_id:monitoringSessionId,event_type:eventType,
+      action:'event',session_id:monitoringSessionId,process_id:APP_INSTANCE_ID,event_type:eventType,
       item_name:String(itemName).slice(0,180),domain:eventType==='site'?String(itemName).slice(0,180):null,
       source:source||'desktop-agent'
     }});
@@ -191,7 +192,7 @@ async function sendActivity(eventType,itemName,source){
 async function endActivity(eventType){
   if(!monitoringSessionId||!currentUser)return false;
   try{
-    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'end_event',session_id:monitoringSessionId,event_type:eventType}});
+    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'end_event',session_id:monitoringSessionId,process_id:APP_INSTANCE_ID,event_type:eventType}});
     return true;
   }catch(_){return false}
 }
@@ -341,7 +342,7 @@ async function startMonitoring(){
 }
 async function stopMonitoring(reason='employee_stopped'){
   if(monitoringSessionId&&currentUser){
-    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId,device_id:deviceId,reason:reason||'employee_stopped'}});
+    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId,device_id:deviceId,process_id:APP_INSTANCE_ID,reason:reason||'employee_stopped'}});
   }
   monitoringActive=false;
   breakActive=false;
@@ -382,7 +383,7 @@ async function signIn(){
 }
 async function signOut(){
   if(monitoringSessionId){
-    try{await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId,device_id:deviceId,reason:'signed_out'}})}catch(_){}
+    try{await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId,device_id:deviceId,process_id:APP_INSTANCE_ID,reason:'signed_out'}})}catch(_){}
   }
   stopCaptureTimer();stopActivityTimer();
   if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null}
