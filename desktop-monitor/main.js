@@ -9,7 +9,6 @@ const crypto=require('node:crypto');
 const http=require('node:http');
 const {execFile}=require('node:child_process');
 const {promisify}=require('node:util');
-const {autoUpdater}=require('electron-updater');
 
 const execFileAsync=promisify(execFile);
 const APP_ORIGIN='https://csconweb-remote.hatchable.site';
@@ -17,8 +16,6 @@ const PARTITION='persist:denvique-desktop-monitor';
 const API_BASE=APP_ORIGIN;
 const DEVICE_FILE=()=>path.join(app.getPath('userData'),'device.json');
 const EXTENSION_PORT=43189;
-const APP_INSTANCE_ID=crypto.randomUUID();
-const APP_INSTANCE_STARTED_AT=Date.now();
 const SCREEN_INTERVAL_MS=5*60*1000;
 const HEARTBEAT_INTERVAL_MS=30*1000;
 const APP_POLL_INTERVAL_MS=15*1000;
@@ -97,7 +94,7 @@ function buildUiState(){
     device_id:deviceId,
     screen_permission:screenPermissionStatus(),
     browser_extension_connected:browserExtensionSeenAt>0&&Date.now()-browserExtensionSeenAt<=90000,
-    browser_extension_required:false,
+    browser_extension_required:process.platform==='win32',
     status_detail:state.state==='outside_shift'?'No current shift is scheduled.':state.state==='pre_shift'?'Your scheduled shift is approaching.':state.state==='on_break'?'Monitoring is paused for your recorded break.':state.state==='in_shift'?'Your scheduled shift is in progress.':'',
   };
 }
@@ -165,7 +162,6 @@ async function captureScreens(){
       form.append('action','capture');
       form.append('session_id',String(monitoringSessionId));
       form.append('device_id',deviceId);
-      form.append('process_id',APP_INSTANCE_ID);
       form.append('screen',new Blob([png],{type:'image/png'}),'screen.png');
       try{
         await apiRequest('/api/desktop-monitor',{method:'POST',form});
@@ -181,7 +177,7 @@ async function sendActivity(eventType,itemName,source){
   if(!monitoringActive||breakActive||!monitoringSessionId||!itemName)return false;
   try{
     await apiRequest('/api/desktop-monitor',{method:'POST',body:{
-      action:'event',session_id:monitoringSessionId,process_id:APP_INSTANCE_ID,event_type:eventType,
+      action:'event',session_id:monitoringSessionId,event_type:eventType,
       item_name:String(itemName).slice(0,180),domain:eventType==='site'?String(itemName).slice(0,180):null,
       source:source||'desktop-agent'
     }});
@@ -194,7 +190,7 @@ async function sendActivity(eventType,itemName,source){
 async function endActivity(eventType){
   if(!monitoringSessionId||!currentUser)return false;
   try{
-    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'end_event',session_id:monitoringSessionId,process_id:APP_INSTANCE_ID,event_type:eventType}});
+    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'end_event',session_id:monitoringSessionId,event_type:eventType}});
     return true;
   }catch(_){return false}
 }
@@ -229,7 +225,7 @@ async function foregroundApplication(){
       const result=await execFileAsync('/usr/bin/osascript',['-e','tell application "System Events" to get name of first application process whose frontmost is true'],{timeout:5000,maxBuffer:1024*1024});
       name=String(result.stdout||'').trim();
     }else if(process.platform==='win32'){
-      const ps="$src='using System; using System.Runtime.InteropServices; public class FG { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint pid); }'; Add-Type $src; $hwnd=[FG]::GetForegroundWindow(); [uint32]$processId=0; [void][FG]::GetWindowThreadProcessId($hwnd,[ref]$processId); if($processId -gt 0){(Get-Process -Id $processId -ErrorAction SilentlyContinue).ProcessName}";
+      const ps="$src='using System; using System.Runtime.InteropServices; public class FG { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint pid); }'; Add-Type $src; $hwnd=[FG]::GetForegroundWindow(); [uint32]$pid=0; [void][FG]::GetWindowThreadProcessId($hwnd,[ref]$pid); if($pid -gt 0){(Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName}";
       const result=await execFileAsync('powershell.exe',['-NoProfile','-NonInteractive','-Command',ps],{timeout:7000,maxBuffer:1024*1024,windowsHide:true});
       name=String(result.stdout||'').trim();
     }
@@ -279,7 +275,7 @@ async function refreshState(){
   if(!currentUser)return buildUiState();
   const heartbeat=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
     action:'heartbeat',device_id:deviceId,platform:platformName(),app_version:appVersion(),
-    process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT,session_id:monitoringSessionId||0
+    session_id:monitoringSessionId||0
   }});
   currentState=heartbeat;
   const returnedSession=heartbeat.session&&Number(heartbeat.session.id);
@@ -323,13 +319,16 @@ async function startMonitoring(){
   if(!stateHasShift())throw new Error('You are outside your scheduled shift window.');
   if(breakActive||currentState.state==='on_break')throw new Error('Monitoring stays paused during your recorded break.');
   if(monitoringActive)return buildUiState();
+  if(process.platform==='win32'&&Date.now()-browserExtensionSeenAt>90000){
+    throw new Error('Install and enable the DENVique Website Activity extension in Chrome or Edge, then press Refresh before activating the shift.');
+  }
   if(process.platform==='darwin'){
     const foreground=await foregroundApplication();
     if(!foreground)throw new Error('Allow the required macOS Accessibility / Automation permission so the app can identify the active application, then retry.');
   }
   await ensureScreenPermission();
   const result=await apiRequest('/api/desktop-monitor',{method:'POST',body:{
-    action:'start',accepted:true,device_id:deviceId,platform:platformName(),app_version:appVersion(),process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
+    action:'start',accepted:true,device_id:deviceId,platform:platformName(),app_version:appVersion()
   }});
   currentState=result;
   monitoringSessionId=Number(result.session&&result.session.id)||Number(result.session&&result.session.shift_id&&result.session.id)||null;
@@ -342,9 +341,9 @@ async function startMonitoring(){
   emitState('Work monitoring activated.');
   return buildUiState();
 }
-async function stopMonitoring(reason='employee_stopped'){
+async function stopMonitoring(){
   if(monitoringSessionId&&currentUser){
-    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId,device_id:deviceId,process_id:APP_INSTANCE_ID,reason:reason||'employee_stopped'}});
+    await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId}});
   }
   monitoringActive=false;
   breakActive=false;
@@ -385,7 +384,7 @@ async function signIn(){
 }
 async function signOut(){
   if(monitoringSessionId){
-    try{await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId,device_id:deviceId,process_id:APP_INSTANCE_ID,reason:'signed_out'}})}catch(_){}
+    try{await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId}})}catch(_){}
   }
   stopCaptureTimer();stopActivityTimer();
   if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null}
@@ -429,16 +428,10 @@ async function openLocalServer(){
       req.on('end',async()=>{
         try{
           const body=JSON.parse(raw||'{}');
-          if(!monitoringActive||breakActive||!monitoringSessionId)throw new Error('monitoring_not_active');
-          if(body.event_type==='site_end'){
-            await endActivity('site');
-            currentSiteDomain='';
-            res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,closed:true}));
-            return;
-          }
           if(body.event_type!=='site')throw new Error('site_event_required');
           const domain=String(body.domain||body.item_name||'').toLowerCase();
           if(!/^[a-z0-9.-]{1,180}$/.test(domain))throw new Error('valid_domain_required');
+          if(!monitoringActive||breakActive||!monitoringSessionId)throw new Error('monitoring_not_active');
           await sendActivity('site',domain,'browser-extension');
           res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true}));
         }catch(error){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:error.message}))}
@@ -452,58 +445,50 @@ async function openLocalServer(){
     localServer.listen(EXTENSION_PORT,'127.0.0.1',()=>{localServer.removeListener('error',reject);resolve()});
   });
 }
-let updaterCheckTimer=null;
-let updaterInitialTimer=null;
-function setupAutoUpdater(){
-  if(!app.isPackaged||process.platform!=='win32')return;
-  autoUpdater.autoDownload=true;
-  autoUpdater.autoInstallOnAppQuit=true;
-  autoUpdater.allowPrerelease=false;
-  autoUpdater.on('checking-for-update',()=>console.log('Checking for DENVique updates.'));
-  autoUpdater.on('update-available',info=>{
-    console.log('DENVique update available:',info.version);
-    emitState('A DENVique update is downloading in the background. It will install when you close the app.');
-  });
-  autoUpdater.on('update-not-available',info=>console.log('DENVique is up to date:',info.version));
-  autoUpdater.on('update-downloaded',info=>{
-    console.log('DENVique update downloaded:',info.version);
-    emitState('A DENVique update is ready. It will install automatically after you close the app.');
-  });
-  autoUpdater.on('error',error=>console.error('DENVique automatic update error:',String(error&&error.message||error).slice(0,500)));
-  const check=()=>autoUpdater.checkForUpdates().catch(error=>{
-    console.error('DENVique update check failed:',String(error&&error.message||error).slice(0,500));
-  });
-  updaterInitialTimer=setTimeout(check,20000);
-  updaterCheckTimer=setInterval(check,5*60*1000);
-  app.on('will-quit',()=>{
-    if(updaterInitialTimer)clearTimeout(updaterInitialTimer);
-    if(updaterCheckTimer)clearInterval(updaterCheckTimer);
-  });
-}
-
 function makeMainWindow(){
-  if(mainWindow&&!mainWindow.isDestroyed()){mainWindow.focus();return}
+  if(mainWindow&&!mainWindow.isDestroyed()){
+    if(mainWindow.isMinimized())mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
   mainWindow=new BrowserWindow({
     width:820,height:790,minWidth:520,minHeight:650,
     title:'DENVique Desktop Monitor',
+    show:false,
+    center:true,
+    backgroundColor:'#f3f4ed',
+    autoHideMenuBar:true,
     webPreferences:{preload:path.join(__dirname,'preload.js'),partition:PARTITION,contextIsolation:true,nodeIntegration:false,sandbox:true}
   });
-  mainWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
-  mainWindow.webContents.on('will-navigate',(event,url)=>{
-    try{
-      const target=new URL(url);
-      if(target.origin!==APP_ORIGIN||target.pathname!=='/desktop-monitor-app')event.preventDefault();
-    }catch(_){event.preventDefault()}
+  const revealWindow=()=>{
+    if(!mainWindow||mainWindow.isDestroyed())return;
+    if(mainWindow.isMinimized())mainWindow.restore();
+    if(!mainWindow.isVisible())mainWindow.show();
+    mainWindow.focus();
+    if(process.platform==='darwin'){
+      try{app.focus({steal:true})}catch(_){}
+    }
+  };
+  const startupFallback=setTimeout(revealWindow,5000);
+  mainWindow.once('ready-to-show',()=>{clearTimeout(startupFallback);revealWindow()});
+  mainWindow.webContents.on('did-finish-load',()=>setTimeout(revealWindow,250));
+  mainWindow.webContents.on('did-fail-load',(_event,errorCode,errorDescription,validatedURL,isMainFrame)=>{
+    if(!isMainFrame)return;
+    console.error('DENVique window failed to load:',errorCode,errorDescription,validatedURL);
+    clearTimeout(startupFallback);
+    revealWindow();
+    dialog.showErrorBox('DENVique Desktop Monitor could not open',String(errorDescription||'The application screen could not be loaded.')+'\n\nPlease check your internet connection and reopen the app.');
   });
-  mainWindow.webContents.on('will-redirect',(event,url)=>{
-    try{
-      const target=new URL(url);
-      if(target.origin!==APP_ORIGIN||target.pathname!=='/desktop-monitor-app')event.preventDefault();
-    }catch(_){event.preventDefault()}
+  mainWindow.webContents.on('render-process-gone',(_event,details)=>{
+    console.error('DENVique renderer stopped:',details);
+    dialog.showErrorBox('DENVique Desktop Monitor stopped unexpectedly','The app window stopped responding. Close and reopen the application. If this repeats, contact DENVique support.');
   });
-  mainWindow.loadURL(APP_ORIGIN+'/desktop-monitor-app').catch(error=>{
-    console.error('Remote DENVique interface unavailable; loading bundled fallback:',String(error&&error.message||error));
-    if(mainWindow&&!mainWindow.isDestroyed())mainWindow.loadFile(path.join(__dirname,'index.html'));
+  mainWindow.loadFile(path.join(__dirname,'index.html')).catch(error=>{
+    console.error('DENVique loadFile failed:',error);
+    clearTimeout(startupFallback);
+    revealWindow();
+    dialog.showErrorBox('DENVique Desktop Monitor could not open',String(error&&error.message||error));
   });
   mainWindow.on('close',event=>{
     if(!monitoringSessionId||quitting)return;
@@ -513,10 +498,10 @@ function makeMainWindow(){
       title:'Work-monitoring session is active',
       message:'Stop the current work-monitoring session before closing DENVique Desktop Monitor.'
     }).then(result=>{
-      if(result.response===1)stopMonitoring('app_closed').then(()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.destroy()}).catch(error=>emitState(error.message));
+      if(result.response===1)stopMonitoring().then(()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.destroy()}).catch(error=>emitState(error.message));
     });
   });
-  mainWindow.on('closed',()=>{mainWindow=null});
+  mainWindow.on('closed',()=>{clearTimeout(startupFallback);mainWindow=null});
 }
 function extensionFolder(){
   return app.isPackaged?path.join(process.resourcesPath,'extension'):path.join(__dirname,'extension');
@@ -525,22 +510,35 @@ ipcMain.handle('monitor:get-state',async()=>{if(!currentUser){try{await verifyLo
 ipcMain.handle('monitor:sign-in',()=>signIn());
 ipcMain.handle('monitor:sign-out',()=>signOut());
 ipcMain.handle('monitor:start',()=>startMonitoring());
-ipcMain.handle('monitor:stop',()=>stopMonitoring('employee_stopped'));
+ipcMain.handle('monitor:stop',()=>stopMonitoring());
 ipcMain.handle('monitor:refresh',()=>heartbeatLoop().then(()=>buildUiState()));
 ipcMain.handle('monitor:open-checkin',()=>shell.openExternal(APP_ORIGIN+'/checkin-verification'));
 ipcMain.handle('monitor:open-extension-folder',()=>shell.openPath(extensionFolder()));
 
-app.whenReady().then(async()=>{
+app.whenReady().then(()=>{
   app.setAsDefaultProtocolClient('denvique-monitor');
   deviceId=readOrCreateDeviceId();
-  await openLocalServer().catch(error=>console.error('Local extension bridge unavailable:',error.message));
+
+  // Show the employee window first. A local browser-extension bridge or a slow
+  // network/session check must never hold the app on a blank screen.
   makeMainWindow();
-  setupAutoUpdater();
-  try{
-    const user=await verifyLogin();
+
+  openLocalServer().catch(error=>console.error('Local extension bridge unavailable:',error.message));
+  verifyLogin().then(user=>{
     if(user)startHeartbeatLoop();
-  }catch(error){emitState(error.message)}
-  app.on('activate',makeMainWindow);
+  }).catch(error=>emitState(error.message));
+
+  app.on('activate',()=>{
+    makeMainWindow();
+    if(mainWindow&&!mainWindow.isDestroyed()){
+      if(mainWindow.isMinimized())mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}).catch(error=>{
+  console.error('DENVique startup failed:',error);
+  dialog.showErrorBox('DENVique Desktop Monitor could not start',String(error&&error.stack||error));
 });
 app.on('open-url',(event,url)=>{event.preventDefault();if(url.startsWith('denvique-monitor:')){makeMainWindow();if(loginWindow&& !loginWindow.isDestroyed())loginWindow.focus()}});
 let quitting=false;
@@ -548,7 +546,7 @@ app.on('before-quit',event=>{
   if(quitting)return;
   if(monitoringSessionId){
     event.preventDefault();
-    stopMonitoring('app_closed').finally(()=>{quitting=true;app.quit()});
+    stopMonitoring().finally(()=>{quitting=true;app.quit()});
   }
 });
 app.on('window-all-closed',()=>{if(process.platform!=='darwin'&&!monitoringActive)app.quit()});

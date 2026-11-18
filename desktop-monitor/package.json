@@ -1,15 +1,14 @@
 {
   "name": "denvique-desktop-monitor",
-  "version": "0.1.0",
+  "version": "0.1.34",
   "description": "DENVique employee desktop companion for shift attendance and consented work monitoring.",
   "private": true,
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build:mac": "electron-builder --mac dmg zip --arm64 --publish never",
-    "build:win": "electron-builder --win nsis --x64 --publish never",
-    "build:mac:intel": "electron-builder --mac dmg zip --x64 --publish never",
-    "check": "node --check main.js && node --check renderer.js && node --check preload.js && node --check extension/service-worker.js && node -e \"JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8'))\""
+    "build:mac": "electron-builder --mac dmg --arm64",
+    "build:win": "electron-builder --win nsis --x64",
+    "build:mac:intel": "electron-builder --mac dmg --x64"
   },
   "devDependencies": {
     "electron": "45.3.4",
@@ -42,17 +41,11 @@
           "arch": [
             "arm64"
           ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64"
-          ]
         }
       ],
       "artifactName": "DENVique-Monitor-mac-${arch}.${ext}",
       "category": "public.app-category.productivity",
-      "identity": null,
+      "identity": "-",
       "extendInfo": {
         "NSAppleEventsUsageDescription": "DENVique Desktop Monitor reads the name of the frontmost application during an acknowledged work-monitoring session. It does not read window titles, typed text or application contents."
       }
@@ -79,17 +72,6 @@
         "from": "extension",
         "to": "extension"
       }
-    ],
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "gaber11222",
-        "repo": "denvique-website",
-        "releaseType": "release"
-      }
     ]
-  },
-  "dependencies": {
-    "electron-updater": "6.8.11"
   }
 }
