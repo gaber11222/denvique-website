@@ -82,7 +82,7 @@ jobs:
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
-          DENVique_UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.DENVique_UPDATE_SIGNING_PRIVATE_KEY }}
+          DENVIQUE_UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.DENVIQUE_UPDATE_SIGNING_PRIVATE_KEY }}
         run: |
           cp desktop-monitor/engine.js release-assets/DENVique-Monitor-runtime.cjs
           node <<'NODE'
@@ -107,9 +107,9 @@ jobs:
             },
             windows: asset('DENVique-Monitor-Setup.exe')
           };
-          const privateKeyText = process.env.DENVique_UPDATE_SIGNING_PRIVATE_KEY || '';
+          const privateKeyText = process.env.DENVIQUE_UPDATE_SIGNING_PRIVATE_KEY || '';
           if (!privateKeyText.trim()) {
-            throw new Error('Missing required DENVique_UPDATE_SIGNING_PRIVATE_KEY repository secret. Refusing to publish unsigned app updates.');
+            throw new Error('Missing required DENVIQUE_UPDATE_SIGNING_PRIVATE_KEY repository secret. Refusing to publish unsigned app updates.');
           }
           const signedPayload = Buffer.from(JSON.stringify(manifest));
           const signature = crypto.sign(null, signedPayload, privateKeyText);
