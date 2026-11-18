@@ -158,8 +158,10 @@ async function captureScreens(){
   if(!portalAccessActive)return false;
   try{
     const sources=await getScreenSources();
+    const captureBatchId=crypto.randomUUID();
     let saved=0;
-    for(const source of sources){
+    for(let captureIndex=0;captureIndex<sources.length&&captureIndex<8;captureIndex++){
+      const source=sources[captureIndex];
       if(!portalAccessActive)break;
       const png=source.thumbnail.toPNG();
       if(!png||png.length<100)continue;
@@ -172,6 +174,8 @@ async function captureScreens(){
       form.append('device_id',deviceId);
       form.append('process_id',APP_INSTANCE_ID);
       form.append('process_started_at',String(APP_INSTANCE_STARTED_AT));
+      form.append('capture_batch_id',captureBatchId);
+      form.append('capture_index',String(captureIndex));
       form.append('screen',new Blob([png],{type:'image/png'}),'screen.png');
       try{
         await apiRequest('/api/desktop-monitor',{method:'POST',form});
