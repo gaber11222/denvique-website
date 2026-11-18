@@ -111,8 +111,14 @@ jobs:
           if (!privateKeyText.trim()) {
             throw new Error('Missing required DENVique_UPDATE_SIGNING_PRIVATE_KEY repository secret. Refusing to publish unsigned app updates.');
           }
-          manifest.signature = crypto.sign(null, Buffer.from(JSON.stringify(manifest)), privateKeyText).toString('base64');
-          console.log('Signed update manifest created for ' + version + '.');
+          const signedPayload = Buffer.from(JSON.stringify(manifest));
+          const signature = crypto.sign(null, signedPayload, privateKeyText);
+          const publicKeyText = fs.readFileSync('desktop-monitor/update-signing-public.pem', 'utf8');
+          if (!crypto.verify(null, signedPayload, publicKeyText, signature)) {
+            throw new Error('The repository signing secret does not match the embedded public key. Refusing to publish an unverifiable update.');
+          }
+          manifest.signature = signature.toString('base64');
+          console.log('Signed and locally verified update manifest created for ' + version + '.');
           fs.writeFileSync('release-assets/DENVique-Monitor-update.json', JSON.stringify(manifest, null, 2));
           const legacyManifest = {
             version,
