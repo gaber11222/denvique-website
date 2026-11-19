@@ -20,7 +20,7 @@ const MAC_UPDATE_DIR = () => path.join(app.getPath('userData'), 'mac-app-updates
 const MAC_PENDING_FILE = () => path.join(MAC_UPDATE_DIR(), 'pending.json');
 const MAX_RUNTIME_BYTES = 2 * 1024 * 1024;
 const MAX_MAC_UPDATE_BYTES = 350 * 1024 * 1024;
-const CHECK_INTERVAL_MS = 15 * 60 * 1000;
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_PUBLIC_KEY_PATH = path.join(app.getAppPath(), 'update-signing-public.pem');
 
 let activeRuntime = null;
