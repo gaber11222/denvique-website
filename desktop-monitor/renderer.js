@@ -84,5 +84,7 @@ el.consent.addEventListener('change',()=>{el.start.disabled=!el.consent.checked}
 api.onState(state=>render(state));
 api.onNotice(notice=>{if(notice)status(notice,'')});
 api.getState().then(render).catch(error=>status(error.message,'error'));
-setInterval(()=>api.refresh().then(render).catch(()=>{}),20000);
+// Background heartbeats are scheduled by the main process. Its monitor:state IPC
+// events keep this view current without issuing duplicate network heartbeats.
+
 })();
