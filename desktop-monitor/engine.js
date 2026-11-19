@@ -431,7 +431,7 @@ async function signIn(){
         emitState('DENVique staff account connected.');
       }
     }catch(error){emitState(error.message)}
-  },1200);
+  },3000);
   return {ok:true};
 }
 async function signOut(){
