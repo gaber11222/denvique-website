@@ -20,13 +20,20 @@ const EXTENSION_PORT=43189;
 const APP_INSTANCE_ID=crypto.randomUUID();
 const APP_INSTANCE_STARTED_AT=Date.now();
 const HEARTBEAT_INTERVAL_MS=300*1000;
-const APP_POLL_INTERVAL_MS=15*1000;
+const APP_POLL_INTERVAL_MS=30*1000;
+const ACTIVITY_BATCH_FLUSH_MS=5000;
 
 let mainWindow=null;
 let loginWindow=null;
 let loginPoll=null;
 let heartbeatTimer=null;
+let heartbeatInitialTimer=null;
 let appPollTimer=null;
+let activityFlushTimer=null;
+let activityFlushInFlight=false;
+let activityRetryNoticeShown=false;
+let activitySequence=0;
+const pendingAccessActivity=new Map();
 let monitoringSessionId=null;
 let monitoringActive=false;
 let portalAccessActive=false;
@@ -117,26 +124,69 @@ function readOrCreateDeviceId(){
 }
 function platformName(){return process.platform==='darwin'?'macOS':process.platform==='win32'?'Windows':process.platform}
 function appVersion(){return app.getVersion()}
-async function sendAccessActivity(eventType,itemName,source,eventAction='opened'){
-  if(!portalAccessActive||!portalAccessSessionId||!currentUser)return false;
-  if(!['app','site'].includes(eventType)||!['opened','closed'].includes(eventAction))return false;
-  try{
-    await apiRequest('/api/desktop-monitor',{method:'POST',body:{
-      action:'access_activity',event_type:eventType,event_action:eventAction,
-      item_name:String(itemName||'').slice(0,180),
-      domain:eventType==='site'?String(itemName||'').slice(0,180).toLowerCase():null,
-      source:source||'desktop-agent',device_id:deviceId,
-      process_id:APP_INSTANCE_ID,process_started_at:APP_INSTANCE_STARTED_AT
-    }});
-    return true;
-  }catch(error){
-    if(!/not actively connected|session is no longer active/i.test(error.message)){
-      emitState('Activity update could not be saved: '+error.message);
-    }
+function scheduleAccessActivityFlush(delay=ACTIVITY_BATCH_FLUSH_MS){
+  if(activityFlushTimer)return;
+  activityFlushTimer=setTimeout(()=>{
+    activityFlushTimer=null;
+    void flushAccessActivityQueue();
+  },delay);
+}
+function clearPendingAccessActivity(){
+  if(activityFlushTimer){clearTimeout(activityFlushTimer);activityFlushTimer=null}
+  pendingAccessActivity.clear();
+}
+async function flushAccessActivityQueue(){
+  if(activityFlushInFlight||!pendingAccessActivity.size)return false;
+  if(!portalAccessActive||!portalAccessSessionId||!currentUser){
+    clearPendingAccessActivity();
     return false;
   }
+  activityFlushInFlight=true;
+  const batch=[...pendingAccessActivity.values()];
+  pendingAccessActivity.clear();
+  try{
+    await apiRequest('/api/desktop-monitor',{method:'POST',body:{
+      action:'access_activity_batch',events:batch,
+      device_id:deviceId,process_id:APP_INSTANCE_ID,
+      process_started_at:APP_INSTANCE_STARTED_AT
+    }});
+    activityRetryNoticeShown=false;
+    return true;
+  }catch(error){
+    if(/not actively connected|session is no longer active/i.test(String(error&&error.message||''))){
+      pendingAccessActivity.clear();
+      activityRetryNoticeShown=false;
+    }else{
+      for(const event of batch){
+        const newer=pendingAccessActivity.get(event.event_type);
+        if(!newer||newer.seq<event.seq)pendingAccessActivity.set(event.event_type,event);
+      }
+      if(!activityRetryNoticeShown){
+        activityRetryNoticeShown=true;
+        emitState('Activity updates are queued and will retry when the connection returns.');
+      }
+      scheduleAccessActivityFlush(15000);
+    }
+    return false;
+  }finally{
+    activityFlushInFlight=false;
+    if(pendingAccessActivity.size&&!activityFlushTimer)scheduleAccessActivityFlush(1000);
+  }
 }
-async function endAccessActivity(eventType,source){
+function sendAccessActivity(eventType,itemName,source,eventAction='opened'){
+  if(!portalAccessActive||!portalAccessSessionId||!currentUser)return false;
+  if(!['app','site'].includes(eventType)||!['opened','closed'].includes(eventAction))return false;
+  const safeItem=String(itemName||'').slice(0,180);
+  pendingAccessActivity.set(eventType,{
+    event_type:eventType,event_action:eventAction,
+    item_name:safeItem,
+    domain:eventType==='site'?(eventAction==='opened'?safeItem.toLowerCase():null):null,
+    source:source||'desktop-agent',seq:++activitySequence
+  });
+  scheduleAccessActivityFlush();
+  return true;
+}
+function endAccessActivity(eventType,source){
   return sendAccessActivity(eventType,'',source||'desktop-agent','closed');
 }
 async function browserDomainForMac(appName){
@@ -211,15 +261,19 @@ function startActivityTimer(){
   appPollTimer=setInterval(pollForegroundApp,APP_POLL_INTERVAL_MS);
   pollForegroundApp();
 }
-function stopActivityTimer(){
+async function stopActivityTimer(){
   if(appPollTimer){clearInterval(appPollTimer);appPollTimer=null}
   const hadApp=!!currentAppName,hadSite=!!currentSiteDomain;
   currentAppName='';
   currentSiteDomain='';
-  const closing=[];
-  if(hadApp)closing.push(endAccessActivity('app','desktop-agent'));
-  if(hadSite)closing.push(endAccessActivity('site',process.platform==='darwin'?'macos-browser-automation':'browser-extension'));
-  return Promise.all(closing);
+  if(!portalAccessActive||!portalAccessSessionId){
+    clearPendingAccessActivity();
+    return false;
+  }
+  if(hadApp)sendAccessActivity('app','', 'desktop-agent','closed');
+  if(hadSite)sendAccessActivity('site','',process.platform==='darwin'?'macos-browser-automation':'browser-extension','closed');
+  if(activityFlushTimer){clearTimeout(activityFlushTimer);activityFlushTimer=null}
+  return flushAccessActivityQueue();
 }
 async function refreshState(){
   if(!currentUser)return buildUiState();
@@ -252,6 +306,7 @@ async function refreshState(){
   if(!portalAccessActive){
     void stopActivityTimer();
   }else if(portalSessionChanged){
+    clearPendingAccessActivity();
     if(appPollTimer)clearInterval(appPollTimer);
     appPollTimer=null;
     currentAppName='';
@@ -267,10 +322,21 @@ async function heartbeatLoop(){
   if(!currentUser)return;
   try{await refreshState()}catch(error){monitoringActive=false;portalAccessActive=false;void stopActivityTimer();emitState('Connection lost: '+error.message)}
 }
+function heartbeatJitterMs(){
+  const value=String(deviceId||APP_INSTANCE_ID);
+  let hash=2166136261;
+  for(let i=0;i<value.length;i++)hash=Math.imul(hash^value.charCodeAt(i),16777619);
+  return (hash>>>0)%60000;
+}
 function startHeartbeatLoop(){
-  if(heartbeatTimer)clearInterval(heartbeatTimer);
+  if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null}
+  if(heartbeatInitialTimer){clearTimeout(heartbeatInitialTimer);heartbeatInitialTimer=null}
   heartbeatLoop();
-  heartbeatTimer=setInterval(heartbeatLoop,HEARTBEAT_INTERVAL_MS);
+  heartbeatInitialTimer=setTimeout(()=>{
+    heartbeatInitialTimer=null;
+    heartbeatLoop();
+    heartbeatTimer=setInterval(heartbeatLoop,HEARTBEAT_INTERVAL_MS);
+  },HEARTBEAT_INTERVAL_MS+heartbeatJitterMs());
 }
 async function startMonitoring(){
   if(!currentUser)throw new Error('Sign in first.');
@@ -326,6 +392,8 @@ async function stopMonitoring(reason='employee_stopped'){
   if(currentUser&&monitoringSessionId){
     try{await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'stop',session_id:monitoringSessionId,device_id:deviceId,process_id:APP_INSTANCE_ID,reason:reason||'employee_stopped'}})}catch(error){emitState('Shift monitoring could not be stopped cleanly: '+error.message)}
   }
+  // Flush final app/site close events while the access session is still valid.
+  await stopActivityTimer();
   if(currentUser&&portalAccessActive){
     try{await apiRequest('/api/desktop-monitor',{method:'POST',body:{action:'portal_stop',device_id:deviceId,process_id:APP_INSTANCE_ID,reason:reason||'employee_stopped'}})}catch(error){emitState('Desktop Monitor connection could not be closed cleanly: '+error.message)}
   }
@@ -334,7 +402,7 @@ async function stopMonitoring(reason='employee_stopped'){
   portalAccessSessionId=null;
   breakActive=false;
   monitoringSessionId=null;
-  await stopActivityTimer();
+  clearPendingAccessActivity();
   emitState('Desktop Monitor connection and app / website activity radar stopped.');
   return buildUiState();
 }
@@ -370,6 +438,8 @@ async function signOut(){
   try{await stopMonitoring('signed_out')}catch(_){}
   await stopActivityTimer();
   if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null}
+  if(heartbeatInitialTimer){clearTimeout(heartbeatInitialTimer);heartbeatInitialTimer=null}
+  clearPendingAccessActivity();
   const cookie=await getCookieHeader();
   if(cookie){
     try{await fetch(API_BASE+'/api/auth0/session',{method:'DELETE',headers:{Origin:APP_ORIGIN,Cookie:cookie,Accept:'application/json'}})}catch(_){}
@@ -523,7 +593,7 @@ function setupAutoUpdater(){
   };
   signedWindowsUpdateCheck=check;
   updaterInitialTimer=setTimeout(check,20000);
-  updaterCheckTimer=setInterval(check,5*60*1000);
+  updaterCheckTimer=setInterval(check,6*60*60*1000);
   app.on('will-quit',()=>{
     if(updaterInitialTimer)clearTimeout(updaterInitialTimer);
     if(updaterCheckTimer)clearInterval(updaterCheckTimer);
