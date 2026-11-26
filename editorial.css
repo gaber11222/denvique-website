@@ -1,27 +1,27 @@
-/* DENVique editorial redesign — hot pink, yellow wave lines, Noto Serif Display.
+/* DENVique editorial redesign — black, white wave lines, Noto Serif Display.
    Public marketing pages only. The legacy theme.css still serves /ar pages.
    Dark is the default theme; html[data-theme="light"] is the exact inverse. */
 :root{
-  --bg:#f02ca5;
-  --ink:#fbe731;
-  --muted:rgba(251,231,49,.78);
-  --muted-on-ink:rgba(240,44,165,.72);
-  --line:rgba(251,231,49,.30);
-  --line-strong:rgba(251,231,49,.55);
-  --ghost:rgba(251,231,49,.12);
-  --glow:rgba(255,255,255,.12);
+  --bg:#050505;
+  --ink:#ffffff;
+  --muted:#a8a8a3;
+  --muted-on-ink:#3c3c38;
+  --line:rgba(255,255,255,.16);
+  --line-strong:rgba(255,255,255,.34);
+  --ghost:rgba(255,255,255,.07);
+  --glow:rgba(255,255,255,.05);
   --serif:'Noto Serif Display',Georgia,'Times New Roman',serif;
   --sans:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 }
 html[data-theme="light"]{
-  --bg:#fbe731;
-  --ink:#f02ca5;
-  --muted:rgba(240,44,165,.78);
-  --muted-on-ink:rgba(251,231,49,.72);
-  --line:rgba(240,44,165,.30);
-  --line-strong:rgba(240,44,165,.55);
-  --ghost:rgba(240,44,165,.12);
-  --glow:rgba(240,44,165,.08);
+  --bg:#fafaf7;
+  --ink:#050505;
+  --muted:#5c5c56;
+  --muted-on-ink:#c9c9c2;
+  --line:rgba(0,0,0,.16);
+  --line-strong:rgba(0,0,0,.34);
+  --ghost:rgba(0,0,0,.06);
+  --glow:rgba(0,0,0,.04);
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
